@@ -12,23 +12,29 @@ Option Explicit
 
 ' ----------------------------------------------------
 ' Project   : https://github.com/yyukki5/Lambda
-' Version   : 0.1.0
+' Version   : 0.2.0
 ' ---
-' try to simple calculation by not using Evaluate().
+' try to simply calculate by not using Evaluate().
 ' ----------------------------------------------------
 
-Public Function EvaluateLambda(val, lambdaString)
-    Dim varstr, formulastr, res, reval, parsedString As String, calcString As String
-        
+Public Function Evaluate(val, lambdaString As String)
+Attribute Evaluate.VB_UserMemId = 0
+    Dim varstr As String, formulastr As String, parsedString As String, calculatedValue
+On Error GoTo errEvaluate
     Call SetLambdaValueFormula(lambdaString, varstr, formulastr)
-    parsedString = ParseParentheses(val, varstr, CStr(formulastr))
-    calcString = CalcInnerParentheses(val, varstr, parsedString)
+    parsedString = ParseParentheses(val, varstr, formulastr)
+    If CalcInnerParentheses(val, varstr, parsedString, calculatedValue) = False Then Set Evaluate = calculatedValue: Exit Function
     
-    EvaluateLambda = RunEvaluate(calcString)
+    Evaluate = RunEvaluate(calculatedValue)
+    Exit Function
+    
+errEvaluate:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "Lambda.Evaluate()", Err.Description
 End Function
 
 
-Private Function SetLambdaValueFormula(str, varstr, formulastr)
+'Private ---------------------------------------------
+Private Function SetLambdaValueFormula(str As String, varstr As String, formulastr As String)
     str = Replace(str, " ", "")
     
     If InStr(str, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
@@ -39,33 +45,75 @@ Private Function SetLambdaValueFormula(str, varstr, formulastr)
     If Len(formulastr) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
 End Function
 
-Private Function CalcInnerParentheses(val, varstr, formulastr) As String
-    Dim sta, lst, cd, reval
+Private Function ParseParentheses(var, varstr As String, formulastr As String) As String
+    Dim stack As Collection, currentString As String, char As String, i As Long, calculatedValue, calculatedString
+
+    Set stack = New Collection
+    currentString = ""
+    calculatedValue = ""
+    calculatedString = ""
+
+    For i = 1 To Len(formulastr)
+        char = Mid(formulastr, i, 1)
+
+        If char = "(" Then
+            If currentString <> "" Then stack.Add currentString
+            currentString = ""
+        ElseIf char = ")" Then
+            
+            If InStr(currentString, varstr) > 0 Then
+                If CalcInnerParentheses(var, varstr, currentString, calculatedString) = False Then _
+                    Err.Raise 9001, "Lambda.ParseParentheses()", "Unsupport error: can not evaluate object "  ' todo maybe able to calculate
+                calculatedValue = RunEvaluate(calculatedString)
+                If IsError(calculatedValue) Then Err.Raise 9006, "Lambda.ParseParentheses()", "Unsupported lambda string. can not evaluate formula"
+            Else
+                calculatedValue = RunEvaluate(currentString)
+            End If
+            ' after close bracket ----------
+            If stack.Count > 0 Then
+                currentString = stack.Item(stack.Count) & "(" & calculatedValue & ")"
+                stack.Remove stack.Count
+                
+                If Mid(formulastr, i + 1, 1) <> "." Then Call CalcInnerParentheses(var, varstr, currentString, currentString)
+            Else
+                currentString = ""
+            End If
+            ' -----------------------------
+        Else
+            currentString = currentString & char
+        End If
+    Next i
+    ParseParentheses = currentString
+End Function
+
+Private Function CalcInnerParentheses(val, varstr As String, formulastr As String, returnValue)
+    Dim sta, lst, termString As String, reval
     Do While InStr(formulastr, varstr) > 0
     
         sta = InStr(formulastr, varstr)
         lst = IIf(InStrOperator(formulastr, sta) = 0, Len(formulastr), InStrOperator(formulastr, sta) - 1)
-        cd = Mid(formulastr, sta, lst - sta + 1)
+        termString = Mid(formulastr, sta, lst - sta + 1)
         
-        Call SetOneValue(val, cd, reval)
-        If IsObject(reval) Then Err.Raise 9001, "Lambda.CalcInnerBrackets()", "Unsupport error: can not evaluate object "
-        If VarType(reval) > vbArray Then Err.Raise 9001, "Lambda.CalcInnerBrackets()", "Unsupport array for evaluate"
-        formulastr = Replace(formulastr, cd, reval)
+        Call SetCalculatedTermValue(val, termString, reval)
+        If IsObject(reval) Then Set returnValue = reval: CalcInnerParentheses = False: Exit Function '
+        If VarType(reval) > vbArray Then Err.Raise 9001, "Lambda.CalcInnerParentheses()", "Unsupport array for evaluate"
+        formulastr = Replace(formulastr, termString, reval)
     Loop
-    CalcInnerParentheses = formulastr
+    returnValue = formulastr
+    CalcInnerParentheses = True
 End Function
 
-Private Function SetOneValue(val, cd, ByRef reval) As Boolean
+Private Function SetCalculatedTermValue(val, termstr As String, ByRef reval) As Boolean
     Dim sp, i, indBrktOpen As Long
-    sp = Split(cd, ".")
+    sp = Split(termstr, ".")
     
     If UBound(sp) = 0 Then
-        If InStrOperator(CStr(cd), 1) > 0 Then Err.Raise 9004, "Lambda.SetOneValue()", "Lambda string has error."
+        If InStrOperator(CStr(termstr), 1) > 0 Then Err.Raise 9004, "Lambda.SetCalculatedTermValue()", "Lambda string has error."
         If IsObject(val) Then Set reval = val Else reval = val
     Else
         Set reval = val
         For i = 1 To UBound(sp)
-            If sp(i) = "" Then Err.Raise 9004, "Lambda.SetOneValue()", "Lambda string has error."
+            If sp(i) = "" Then Err.Raise 9004, "Lambda.SetCalculatedTermValue()", "Lambda string has error."
             
             indBrktOpen = InStr(sp(i), "(")
             If indBrktOpen > 0 Then
@@ -76,7 +124,7 @@ Private Function SetOneValue(val, cd, ByRef reval) As Boolean
         Next i
     End If
     
-    If IsObject(reval) Then SetOneValue = True Else SetOneValue = False
+    If IsObject(reval) Then SetCalculatedTermValue = True Else SetCalculatedTermValue = False
 End Function
 
 Private Function InStrOperator(str, sta) As Long
@@ -142,57 +190,18 @@ Private Function SetObjBuf(ByRef val, ByRef reval)
     If isObj Then Set reval = val Else reval = val
 End Function
 
-Private Function ParseParentheses(var, varstr, inputStr As String) As String
-    Dim stack As Collection, currentContent As String, char As String, i As Long, calclatedContent, calculatedString
-
-    Set stack = New Collection
-    currentContent = ""
-    calclatedContent = ""
-    calculatedString = ""
-
-    For i = 1 To Len(inputStr)
-        char = Mid(inputStr, i, 1)
-
-        If char = "(" Then
-            If currentContent <> "" Then stack.Add currentContent
-            currentContent = ""
-        ElseIf char = ")" Then
-            If InStr(currentContent, varstr) > 0 Then
-                calculatedString = CalcInnerParentheses(var, varstr, currentContent)
-                calclatedContent = RunEvaluate(calculatedString)
-                If IsError(calclatedContent) Then Err.Raise 9006, "Lambda.ProcessParentheses()", "Unsupported lambda string. can not evaluate formula"
-            Else
-                calclatedContent = RunEvaluate(currentContent)
-            End If
-            ' after close bracket ----------
-            If stack.Count > 0 Then
-                currentContent = stack.Item(stack.Count) & "(" & calclatedContent & ")"
-                stack.Remove stack.Count
-                
-                If Mid(inputStr, i + 1, 1) <> "." Then Call CalcInnerParentheses(var, varstr, currentContent)
-            Else
-                currentContent = ""
-            End If
-            ' -----------------------------
-        Else
-            currentContent = currentContent & char
-        End If
-    Next i
-    ParseParentheses = currentContent
-End Function
-
-Private Function RunEvaluate(nonBracketFormulaStr) As Variant
+Private Function RunEvaluate(nonParenthesesFormulaStr) As Variant
     Dim res, str, strFixedCaret
-    strFixedCaret = Replace(nonBracketFormulaStr, "^", " ^ ")
+    strFixedCaret = Replace(nonParenthesesFormulaStr, "^", " ^ ")
     str = strFixedCaret
     res = SplitByOperator(str)
     RunEvaluate = res
 End Function
 
-
 Private Function SplitByOperator(str)
     Dim c, i As Long, ope, o, arrOpeLfRg(0 To 2)
     
+On Error GoTo errSplitByOperator
     ' note: element arrangement in array equal calaculated order
     ope = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
                 " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
@@ -211,6 +220,11 @@ Private Function SplitByOperator(str)
         Next i
     Next
     If IsNumeric(str) Then SplitByOperator = val(str) Else SplitByOperator = str
+    Exit Function
+    
+errSplitByOperator:
+   Err.Raise 9001, Err.Number, Err.Description
+    
 End Function
 
 Private Function Calc(ope, lf, rg)
@@ -246,5 +260,3 @@ On Error GoTo errCalc
 errCalc:
     Err.Raise 9001, "Lambda.Calc()", "formula string has error : " & lf & " " & ope & " " & rg
 End Function
-
-
