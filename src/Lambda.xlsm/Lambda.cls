@@ -17,166 +17,213 @@ Option Explicit
 ' try to simply calculate by not using Evaluate().
 ' ----------------------------------------------------
 
-Public Function Evaluate(val, lambdaString As String)
+Public Function Evaluate(evaluating_variable, lambda_string As String)
 Attribute Evaluate.VB_UserMemId = 0
-    Dim varstr As String, formulastr As String, parsedString As String, calculatedValue
+    Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
+        
 On Error GoTo errEvaluate
-    Call SetLambdaValueFormula(lambdaString, varstr, formulastr)
-    parsedString = ParseParentheses(val, varstr, formulastr)
-    If CalcInnerParentheses(val, varstr, parsedString, calculatedValue) = False Then Set Evaluate = calculatedValue: Exit Function
+    If IsObject(evaluating_variable) Then Set eval_var = evaluating_variable Else Let eval_var = evaluating_variable
+
+    Call ValidateLambdaString(lambda_string)
+    var_string = GetVarString(lambda_string)
+    formula_string = GetFormulaString(lambda_string)
     
-    Evaluate = RunEvaluate(calculatedValue)
+    parsed_string = ParseParentheses(eval_var, var_string, formula_string)
+    Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, Evaluate)
     Exit Function
     
 errEvaluate:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "Lambda.Evaluate()", Err.Description
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
 End Function
-
 
 'Private ---------------------------------------------
-Private Function SetLambdaValueFormula(str As String, varstr As String, formulastr As String)
-    str = Replace(str, " ", "")
+Private Sub ValidateLambdaString(lambda_string As String)
+    If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
+End Sub
+
+Private Function GetVarString(lambda_string As String) As String
+    Dim var_string As String
     
-    If InStr(str, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
-    varstr = Mid(str, 1, InStr(str, "=>") - 1)
-    formulastr = Mid(str, InStr(str, "=>") + 2)
+    var_string = Mid(lambda_string, 1, InStr(lambda_string, "=>") - 1)
+    If Len(var_string) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
     
-    If Len(varstr) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
-    If Len(formulastr) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
+    GetVarString = var_string
 End Function
 
-Private Function ParseParentheses(var, varstr As String, formulastr As String) As String
-    Dim stack As Collection, currentString As String, char As String, i As Long, calculatedValue, calculatedString
+Private Function GetFormulaString(lambda_string As String) As String
+    Dim formula_string As String
+    
+    formula_string = Mid(lambda_string, InStr(lambda_string, "=>") + 2)
+    If Len(formula_string) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
+    
+    GetFormulaString = formula_string
+End Function
 
-    Set stack = New Collection
-    currentString = ""
-    calculatedValue = ""
-    calculatedString = ""
+Private Function ParseParentheses(eval_var, var_string As String, formula_string As String) As String
+    Dim formula_stack As Collection, current_str As String, char As String, i As Long, calculated_value
+    Set formula_stack = New Collection
 
-    For i = 1 To Len(formulastr)
-        char = Mid(formulastr, i, 1)
+    For i = 1 To Len(formula_string)
+        char = Mid(formula_string, i, 1)
 
         If char = "(" Then
-            If currentString <> "" Then stack.Add currentString
-            currentString = ""
+            If current_str <> "" Then formula_stack.Add current_str
+            current_str = ""
+        
         ElseIf char = ")" Then
+            ' after close parenthese ----------
+            calculated_value = ConvertPolynomialToValue(eval_var, var_string, current_str)
             
-            If InStr(currentString, varstr) > 0 Then
-                If CalcInnerParentheses(var, varstr, currentString, calculatedString) = False Then _
-                    Err.Raise 9001, "Lambda.ParseParentheses()", "Unsupport error: can not evaluate object "  ' todo maybe able to calculate
-                calculatedValue = RunEvaluate(calculatedString)
-                If IsError(calculatedValue) Then Err.Raise 9006, "Lambda.ParseParentheses()", "Unsupported lambda string. can not evaluate formula"
+            If formula_stack.Count > 0 Then
+                current_str = formula_stack.Item(formula_stack.Count) & "(" & calculated_value & ")"
+                formula_stack.Remove formula_stack.Count
             Else
-                calculatedValue = RunEvaluate(currentString)
-            End If
-            ' after close bracket ----------
-            If stack.Count > 0 Then
-                currentString = stack.Item(stack.Count) & "(" & calculatedValue & ")"
-                stack.Remove stack.Count
-                
-                If Mid(formulastr, i + 1, 1) <> "." Then Call CalcInnerParentheses(var, varstr, currentString, currentString)
-            Else
-                currentString = ""
+                current_str = ""
             End If
             ' -----------------------------
         Else
-            currentString = currentString & char
+            current_str = current_str & char
+            
         End If
     Next i
-    ParseParentheses = currentString
+    ParseParentheses = current_str
 End Function
 
-Private Function CalcInnerParentheses(val, varstr As String, formulastr As String, returnValue)
-    Dim sta, lst, termString As String, reval
-    Do While InStr(formulastr, varstr) > 0
-    
-        sta = InStr(formulastr, varstr)
-        lst = IIf(InStrOperator(formulastr, sta) = 0, Len(formulastr), InStrOperator(formulastr, sta) - 1)
-        termString = Mid(formulastr, sta, lst - sta + 1)
-        
-        Call SetCalculatedTermValue(val, termString, reval)
-        If IsObject(reval) Then Set returnValue = reval: CalcInnerParentheses = False: Exit Function '
-        If VarType(reval) > vbArray Then Err.Raise 9001, "Lambda.CalcInnerParentheses()", "Unsupport array for evaluate"
-        formulastr = Replace(formulastr, termString, reval)
-    Loop
-    returnValue = formulastr
-    CalcInnerParentheses = True
-End Function
 
-Private Function SetCalculatedTermValue(val, termstr As String, ByRef reval) As Boolean
-    Dim sp, i, indBrktOpen As Long
-    sp = Split(termstr, ".")
-    
-    If UBound(sp) = 0 Then
-        If InStrOperator(CStr(termstr), 1) > 0 Then Err.Raise 9004, "Lambda.SetCalculatedTermValue()", "Lambda string has error."
-        If IsObject(val) Then Set reval = val Else reval = val
+' example) "x.abc" -> x.abc or "x.abc.def" -> 3,   "x.abc + x.abc.def" -> x.abc + 3 (error)
+Private Function TryConvertPolynominalToValue(eval_var, var_str As String, formula_str As String, ByRef return_value) As Boolean
+
+    If InStrOperator(formula_str, 1) > 0 Then
+        ' polynominal
+        return_value = ConvertPolynomialToValue(eval_var, var_str, formula_str)
+        TryConvertPolynominalToValue = False
     Else
-        Set reval = val
-        For i = 1 To UBound(sp)
-            If sp(i) = "" Then Err.Raise 9004, "Lambda.SetCalculatedTermValue()", "Lambda string has error."
+        ' monominal
+        TryConvertPolynominalToValue = TryConvertMonomialToValue(eval_var, formula_str, return_value)
+    End If
+    
+End Function
+
+' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1" -> 9
+Private Function ConvertPolynomialToValue(eval_var, var_str As String, formula_str As String) As Variant
+    Dim calculated_value, calculated_string
+    
+    If InStr(formula_str, var_str) > 0 Then
+        calculated_string = ConvertToPolynomialWithoutObject(eval_var, var_str, formula_str)
+    Else
+        calculated_string = formula_str
+    End If
+    
+    calculated_value = RunEvaluate(calculated_string)
+    If IsError(calculated_value) Then Err.Raise 9006, "Lambda.ConvertPolynomialToValue()", "Unsupported lambda string. can not evaluate formula"
+    
+    ConvertPolynomialToValue = calculated_value
+End Function
+
+' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1"
+Private Function ConvertToPolynomialWithoutObject(eval_var, var_str As String, formula_str As String) As String
+    Dim start_index, last_index, term_string As String, buf_val
+    
+    Do While InStr(formula_str, var_str) > 0
+    
+        start_index = InStr(formula_str, var_str)
+        last_index = IIf(InStrOperator(formula_str, start_index) = 0, Len(formula_str), InStrOperator(formula_str, start_index) - 1)
+        term_string = Mid(formula_str, start_index, last_index - start_index + 1)
+    
+        Call TryConvertMonomialToValue(eval_var, term_string, buf_val)
+    
+        If IsObject(buf_val) Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Failed to evaluate, converted as object"
+        If VarType(buf_val) > vbArray Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Unsupport array for evaluate"
+        
+        formula_str = Replace(formula_str, term_string, buf_val)
+    Loop
+    
+    ConvertToPolynomialWithoutObject = formula_str
+End Function
+
+
+' example) "x.abc.def" -> 1
+Private Function TryConvertMonomialToValue(eval_var, monominal_string As String, ByRef return_value) As Boolean
+    Dim splited_by_dot, i, index_parenthes_open As Long
+    
+    monominal_string = Replace(monominal_string, " ", "")
+    splited_by_dot = Split(monominal_string, ".")
+    
+    If UBound(splited_by_dot) = 0 Then
+        If InStrOperator(CStr(monominal_string), 1) > 0 Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error."
+        If IsObject(eval_var) Then Set return_value = eval_var Else return_value = eval_var
+    Else
+        Set return_value = eval_var
+        For i = 1 To UBound(splited_by_dot)
+            If splited_by_dot(i) = "" Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error."
             
-            indBrktOpen = InStr(sp(i), "(")
-            If indBrktOpen > 0 Then
-                Call SetCallByNameValue(reval, Left(sp(i), indBrktOpen - 1), reval, Mid(sp(i), indBrktOpen + 1, InStr(sp(i), ")") - indBrktOpen - 1))
+            index_parenthes_open = InStr(splited_by_dot(i), "(")
+            If index_parenthes_open > 0 Then
+                Call SetCallByNameValue( _
+                    called_object:=return_value, _
+                    called_proc_name:=Left(splited_by_dot(i), index_parenthes_open - 1), _
+                    return_value:=return_value, _
+                    args:=Mid(splited_by_dot(i), index_parenthes_open + 1, InStr(splited_by_dot(i), ")") - index_parenthes_open - 1))
             Else
-                Call SetCallByNameValue(reval, CStr(sp(i)), reval)
+                Call SetCallByNameValue(return_value, CStr(splited_by_dot(i)), return_value)
             End If
         Next i
     End If
     
-    If IsObject(reval) Then SetCalculatedTermValue = True Else SetCalculatedTermValue = False
+    If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
 End Function
 
-Private Function InStrOperator(str, sta) As Long
+Private Function InStrOperator(string_has_operator, start_index) As Long
     Dim i As Long
-    For i = 0 To Len(str) - 1
-        If IsOperator(Mid(str, sta + i)) Then InStrOperator = sta + i: Exit Function
+    
+    For i = start_index To Len(string_has_operator)
+        If IsOperator(Mid(string_has_operator, i)) Then InStrOperator = i: Exit Function
     Next i
     InStrOperator = 0
 End Function
 
-Private Function IsOperator(str) As Boolean
+Private Function IsOperator(operator_string) As Boolean
     IsOperator = True
-    If Left(str, 1) = "<" Then Exit Function
-    If Left(str, 2) = "<=" Then Exit Function
-    If Left(str, 1) = ">" Then Exit Function
-    If Left(str, 2) = ">=" Then Exit Function
-    If Left(str, 1) = "=" Then Exit Function
-    If Left(str, 1) = "+" Then Exit Function
-    If Left(str, 1) = "-" Then Exit Function
-    If Left(str, 1) = "*" Then Exit Function
-    If Left(str, 1) = "/" Then Exit Function
-    If Left(str, 1) = "^" Then Exit Function
-    If Left(str, 1) = "&" Then Exit Function
+    If Left(operator_string, 1) = "<" Then Exit Function
+    If Left(operator_string, 2) = "<=" Then Exit Function
+    If Left(operator_string, 1) = ">" Then Exit Function
+    If Left(operator_string, 2) = ">=" Then Exit Function
+    If Left(operator_string, 1) = "=" Then Exit Function
+    If Left(operator_string, 1) = "+" Then Exit Function
+    If Left(operator_string, 1) = "-" Then Exit Function
+    If Left(operator_string, 1) = "*" Then Exit Function
+    If Left(operator_string, 1) = "/" Then Exit Function
+    If Left(operator_string, 1) = "^" Then Exit Function
+    If Left(operator_string, 1) = "&" Then Exit Function
     IsOperator = False
 End Function
 
-Private Function SetCallByNameValue(cls, propName As String, ByRef reval, Optional args As Variant) As Boolean
+Private Function SetCallByNameValue(called_object, called_proc_name As String, ByRef return_value, Optional args As Variant) As Boolean
     If IsMissing(args) Then
         On Error GoTo errGetWithoutArg
-        Call SetObjBuf(CallByName(cls, propName, VbGet), reval)
-        SetCallByNameValue = IsObject(reval)
+        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), return_value)
+        SetCallByNameValue = IsObject(return_value)
         Exit Function
 errGetWithoutArg:
         If Err.Number = 450 Then
-            Call SetObjBuf(CallByName(cls, propName, VbMethod), reval)
-            SetCallByNameValue = IsObject(reval)
+            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod), return_value)
+            SetCallByNameValue = IsObject(return_value)
         ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(cls) & "." & propName
+            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
         Else
             Err.Raise Err.Number, Err.Source, Err.Description
         End If
     Else
         On Error GoTo errGetWitArg
-        Call SetObjBuf(CallByName(cls, propName, VbGet, args), reval)
-        SetCallByNameValue = IsObject(reval)
+        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet, args), return_value)
+        SetCallByNameValue = IsObject(return_value)
         Exit Function
 errGetWitArg:
         If Err.Number = 450 Then
-            Call SetObjBuf(CallByName(cls, propName, VbMethod, args), reval)
-            SetCallByNameValue = IsObject(reval)
+            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod, args), return_value)
+            SetCallByNameValue = IsObject(return_value)
         ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(cls) & "." & propName
+            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
         Else
             Err.Raise Err.Number, Err.Source, Err.Description
         End If
@@ -184,42 +231,42 @@ errGetWitArg:
     Exit Function
 End Function
 
-Private Function SetObjBuf(ByRef val, ByRef reval)
+Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
     Dim isObj As Boolean
-    isObj = IsObject(val)
-    If isObj Then Set reval = val Else reval = val
+    isObj = IsObject(unverified_value)
+    If isObj Then Set buffer_value = unverified_value Else buffer_value = unverified_value
 End Function
 
-Private Function RunEvaluate(nonParenthesesFormulaStr) As Variant
-    Dim res, str, strFixedCaret
-    strFixedCaret = Replace(nonParenthesesFormulaStr, "^", " ^ ")
-    str = strFixedCaret
-    res = SplitByOperator(str)
-    RunEvaluate = res
+Private Function RunEvaluate(non_parentheses_formula_str) As Variant
+    Dim result_value, str, fixed_caret_string
+    fixed_caret_string = Replace(non_parentheses_formula_str, "^", " ^ ")
+    str = fixed_caret_string
+    result_value = SplitByOperator(str)
+    RunEvaluate = result_value
 End Function
 
-Private Function SplitByOperator(str)
-    Dim c, i As Long, ope, o, arrOpeLfRg(0 To 2)
+Private Function SplitByOperator(string_has_operator)
+    Dim i As Long, operator_strings, o, formular_info(0 To 2)
     
 On Error GoTo errSplitByOperator
     ' note: element arrangement in array equal calaculated order
-    ope = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
+    operator_strings = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
                 " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
                 "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
     
-    For Each o In ope
-        For i = 1 To Len(str)
-            If o = Mid(str, i, 1) Or o = Mid(str, i, 2) Or o = Mid(str, i, 3) Or o = Mid(str, i, 4) Or o = Mid(str, i, 5) Or o = Mid(str, i, 6) Then
-                arrOpeLfRg(0) = o
-                arrOpeLfRg(1) = Left(str, i - 1)
-                arrOpeLfRg(2) = Mid(str, i + Len(o))
+    For Each o In operator_strings
+        For i = 1 To Len(string_has_operator)
+            If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
+                formular_info(0) = o
+                formular_info(1) = Left(string_has_operator, i - 1)
+                formular_info(2) = Mid(string_has_operator, i + Len(o))
                 
-                SplitByOperator = Calc(arrOpeLfRg(0), SplitByOperator(arrOpeLfRg(1)), SplitByOperator(arrOpeLfRg(2)))
+                SplitByOperator = CalculateOperator(formular_info(0), SplitByOperator(formular_info(1)), SplitByOperator(formular_info(2)))
                 Exit Function
             End If
         Next i
     Next
-    If IsNumeric(str) Then SplitByOperator = val(str) Else SplitByOperator = str
+    If IsNumeric(string_has_operator) Then SplitByOperator = val(string_has_operator) Else SplitByOperator = string_has_operator
     Exit Function
     
 errSplitByOperator:
@@ -227,36 +274,40 @@ errSplitByOperator:
     
 End Function
 
-Private Function Calc(ope, lf, rg)
-    If IsNumeric(lf) Then lf = val(lf)
-    If IsNumeric(rg) Then rg = val(rg)
+Private Function CalculateOperator(operator_string, left_value, right_value)
+    Dim calculated_value
+    If IsNumeric(left_value) Then left_value = val(left_value)
+    If IsNumeric(right_value) Then right_value = val(right_value)
 
 On Error GoTo errCalc
-    Select Case ope
-        Case "<=": Calc = lf <= rg
-        Case ">=": Calc = lf >= rg
-        Case ">": Calc = lf > rg
-        Case "<": Calc = lf < rg
-        Case "<>": Calc = lf <> rg
-        Case "=": Calc = lf = rg
-        Case "&": Calc = lf & rg
-        Case "+": Calc = lf + rg
-        Case "-": Calc = lf - rg
-        Case "*": Calc = lf * rg
-        Case "/": Calc = lf / rg
-        Case "\": Calc = lf \ rg
-        Case " ^ ": Calc = lf ^ rg
-        Case " Mod ": Calc = lf Mod rg
-        Case " Imp ": Calc = lf Imp rg
-        Case " Eqv ": Calc = lf Eqv rg
-        Case " Xor ": Calc = lf Xor rg
-        Case " Or ": Calc = lf Or rg
-        Case " And ": Calc = lf And rg
-        Case " Not ": Calc = Not lf
-        Case " Like ": Calc = lf Like rg
-        Case " Is ": Calc = lf Is rg
+    Select Case operator_string
+        Case "<=": calculated_value = left_value <= right_value
+        Case ">=": calculated_value = left_value >= right_value
+        Case ">": calculated_value = left_value > right_value
+        Case "<": calculated_value = left_value < right_value
+        Case "<>": calculated_value = left_value <> right_value
+        Case "=": calculated_value = left_value = right_value
+        Case "&": calculated_value = left_value & right_value
+        Case "+": calculated_value = left_value + right_value
+        Case "-": calculated_value = left_value - right_value
+        Case "*": calculated_value = left_value * right_value
+        Case "/": calculated_value = left_value / right_value
+        Case "\": calculated_value = left_value \ right_value
+        Case " ^ ": calculated_value = left_value ^ right_value
+        Case " Mod ": calculated_value = left_value Mod right_value
+        Case " Imp ": calculated_value = left_value Imp right_value
+        Case " Eqv ": calculated_value = left_value Eqv right_value
+        Case " Xor ": calculated_value = left_value Xor right_value
+        Case " Or ": calculated_value = left_value Or right_value
+        Case " And ": calculated_value = left_value And right_value
+        Case " Not ": calculated_value = Not left_value
+        Case " Like ": calculated_value = left_value Like right_value
+        Case " Is ": calculated_value = left_value Is right_value
     End Select
+    
+    CalculateOperator = calculated_value
     Exit Function
 errCalc:
-    Err.Raise 9001, "Lambda.Calc()", "formula string has error : " & lf & " " & ope & " " & rg
+    Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
 End Function
+
