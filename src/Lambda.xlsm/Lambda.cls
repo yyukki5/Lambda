@@ -17,19 +17,25 @@ Option Explicit
 ' try to simply calculate by not using Evaluate().
 ' ----------------------------------------------------
 
+Private Const TAG_STRING_OPEN As String = "<string "
+Private Const TAG_STRING_CLOSE As String = " string/>"
+
+
 Public Function Evaluate(evaluating_variable, lambda_string As String)
 Attribute Evaluate.VB_UserMemId = 0
     Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
         
 On Error GoTo errEvaluate
-    If IsObject(evaluating_variable) Then Set eval_var = evaluating_variable Else Let eval_var = evaluating_variable
+'    If IsObject(evaluating_variable) Then Set eval_var = evaluating_variable Else Let eval_var = evaluating_variable
+    Call AddTag(evaluating_variable, eval_var)
 
     Call ValidateLambdaString(lambda_string)
     var_string = GetVarString(lambda_string)
     formula_string = GetFormulaString(lambda_string)
     
     parsed_string = ParseParentheses(eval_var, var_string, formula_string)
-    Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, Evaluate)
+    Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, evaluated_value)
+    Call RemoveTags(evaluated_value, Evaluate)
     Exit Function
     
 errEvaluate:
@@ -40,6 +46,30 @@ End Function
 Private Sub ValidateLambdaString(lambda_string As String)
     If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
 End Sub
+
+
+Private Function AddTag(unverfied_value, re_value)
+    If IsObject(unverfied_value) Then
+        Set re_value = unverfied_value
+    Else
+        Select Case VarType(unverfied_value)
+            Case vbString: re_value = ConvertAsString(unverfied_value)
+            Case Else:     re_value = unverfied_value
+        End Select
+    End If
+End Function
+Private Function RemoveTags(unverfied_value, re_value)
+    If IsObject(unverfied_value) Then
+        Set re_value = unverfied_value
+    Else
+        Select Case VarType(unverfied_value)
+            Case vbString: re_value = DeconvertAsString(unverfied_value)
+            Case Else:     re_value = unverfied_value
+        End Select
+    End If
+End Function
+
+
 
 Private Function GetVarString(lambda_string As String) As String
     Dim var_string As String
@@ -174,10 +204,14 @@ Private Function TryConvertMonomialToValue(eval_var, monominal_string As String,
 End Function
 
 Private Function InStrOperator(string_has_operator, start_index) As Long
-    Dim i As Long
+    Dim i As Long, str As String
     
     For i = start_index To Len(string_has_operator)
-        If IsOperator(Mid(string_has_operator, i)) Then InStrOperator = i: Exit Function
+        str = Mid(string_has_operator, i)
+        
+        i = i + GetTagLength(str)
+        
+        If IsOperator(str) Then InStrOperator = i: Exit Function
     Next i
     InStrOperator = 0
 End Function
@@ -255,16 +289,21 @@ On Error GoTo errSplitByOperator
                 "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
     
     For Each o In operator_strings
-        For i = 1 To Len(string_has_operator)
-            If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
-                formular_info(0) = o
-                formular_info(1) = Left(string_has_operator, i - 1)
-                formular_info(2) = Mid(string_has_operator, i + Len(o))
-                
-                SplitByOperator = CalculateOperator(formular_info(0), SplitByOperator(formular_info(1)), SplitByOperator(formular_info(2)))
-                Exit Function
-            End If
-        Next i
+        SplitByOperator = CalculateByOperator(string_has_operator, o)
+        If SplitByOperator <> Empty Then Exit Function
+        
+'        For i = 1 To Len(string_has_operator)
+'            i = i + GetTagLength(Mid(string_has_operator, i))
+'
+'            If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
+'                formular_info(0) = o
+'                formular_info(1) = Left(string_has_operator, i - 1)
+'                formular_info(2) = Mid(string_has_operator, i + Len(o))
+'
+'                SplitByOperator = CalculateOperator(formular_info(0), SplitByOperator(formular_info(1)), SplitByOperator(formular_info(2)))
+'                Exit Function
+'            End If
+'        Next i
     Next
     If IsNumeric(string_has_operator) Then SplitByOperator = val(string_has_operator) Else SplitByOperator = string_has_operator
     Exit Function
@@ -273,6 +312,23 @@ errSplitByOperator:
    Err.Raise 9001, Err.Number, Err.Description
     
 End Function
+
+Private Function CalculateByOperator(string_has_operator, o)
+    Dim i As Long, vl, vr
+
+    For i = 1 To Len(string_has_operator)
+        i = i + GetTagLength(Mid(string_has_operator, i))
+    
+        If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
+            vl = SplitByOperator(Left(string_has_operator, i - 1))
+            vr = SplitByOperator(Mid(string_has_operator, i + Len(o)))
+            CalculateByOperator = CalculateOperator(operator_string:=o, left_value:=vl, right_value:=vr)
+            Exit Function
+        End If
+    Next i
+End Function
+
+
 
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value
@@ -311,3 +367,17 @@ errCalc:
     Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
 End Function
 
+Private Function GetTagLength(str) As Long
+    GetTagLength = 0
+    If Left(str, Len(TAG_STRING_OPEN)) = TAG_STRING_OPEN Then _
+        GetTagLength = InStr(str, TAG_STRING_CLOSE) + Len(TAG_STRING_CLOSE)
+End Function
+
+
+
+Private Function ConvertAsString(converted_string) As String
+    If InStr(converted_string, TAG_STRING_OPEN) > 0 Then ConvertAsString = converted_string Else ConvertAsString = TAG_STRING_OPEN & converted_string & TAG_STRING_CLOSE
+End Function
+Private Function DeconvertAsString(deconverted_string)
+    If InStr(deconverted_string, TAG_STRING_OPEN) > 0 Then DeconvertAsString = Replace(Replace(deconverted_string, TAG_STRING_OPEN, ""), TAG_STRING_CLOSE, "")
+End Function
