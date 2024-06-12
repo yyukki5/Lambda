@@ -271,51 +271,41 @@ Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
     If isObj Then Set buffer_value = unverified_value Else buffer_value = unverified_value
 End Function
 
+' "1 + 1 + 1"  -> 3
 Private Function RunEvaluate(non_parentheses_formula_str) As Variant
-    Dim result_value, str, fixed_caret_string
-    fixed_caret_string = Replace(non_parentheses_formula_str, "^", " ^ ")
-    str = fixed_caret_string
-    result_value = SplitByOperator(str)
+    Dim result_value
+    result_value = SplitByOperator(non_parentheses_formula_str)
     RunEvaluate = result_value
 End Function
 
+' "1 + 2 + 3"  -> 6
 Private Function SplitByOperator(string_has_operator)
     Dim i As Long, operator_strings, o, formular_info(0 To 2)
     
-On Error GoTo errSplitByOperator
     ' note: element arrangement in array equal calaculated order
     operator_strings = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
                 " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
                 "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
     
+On Error GoTo errSplitByOperator
     For Each o In operator_strings
         SplitByOperator = CalculateByOperator(string_has_operator, o)
-        If SplitByOperator <> Empty Then Exit Function
-        
-'        For i = 1 To Len(string_has_operator)
-'            i = i + GetTagLength(Mid(string_has_operator, i))
-'
-'            If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
-'                formular_info(0) = o
-'                formular_info(1) = Left(string_has_operator, i - 1)
-'                formular_info(2) = Mid(string_has_operator, i + Len(o))
-'
-'                SplitByOperator = CalculateOperator(formular_info(0), SplitByOperator(formular_info(1)), SplitByOperator(formular_info(2)))
-'                Exit Function
-'            End If
-'        Next i
+        If IsEmpty(SplitByOperator) = False Then Exit Function
     Next
+    
     If IsNumeric(string_has_operator) Then SplitByOperator = val(string_has_operator) Else SplitByOperator = string_has_operator
     Exit Function
     
 errSplitByOperator:
-   Err.Raise 9001, Err.Number, Err.Description
+   Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.SplitByOperator(" & string_has_operator & ")", Err.Description & vbCrLf & "failed to split by operator"
     
 End Function
-
+ 
+' "1 + 2 + 3"  -> 6
 Private Function CalculateByOperator(string_has_operator, o)
     Dim i As Long, vl, vr
 
+On Error GoTo errCalculate
     For i = 1 To Len(string_has_operator)
         i = i + GetTagLength(Mid(string_has_operator, i))
     
@@ -326,12 +316,17 @@ Private Function CalculateByOperator(string_has_operator, o)
             Exit Function
         End If
     Next i
+    Exit Function
+    
+errCalculate:
+    Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.CalculateByOperator(" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
 End Function
 
-
-
+' 1 + 2  -> 3
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value
+    left_value = Trim(left_value)
+    right_value = Trim(right_value)
     If IsNumeric(left_value) Then left_value = val(left_value)
     If IsNumeric(right_value) Then right_value = val(right_value)
 
