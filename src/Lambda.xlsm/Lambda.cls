@@ -214,19 +214,20 @@ End Function
 
 Private Function IsOperator(operator_string) As Boolean
     IsOperator = True
-    If Left(operator_string, 1) = "<" Then Exit Function
-    If Left(operator_string, 2) = "<=" Then Exit Function
-    If Left(operator_string, 1) = ">" Then Exit Function
-    If Left(operator_string, 2) = ">=" Then Exit Function
-    If Left(operator_string, 1) = "=" Then Exit Function
-    If Left(operator_string, 1) = "+" Then Exit Function
-    If Left(operator_string, 1) = "-" Then Exit Function
-    If Left(operator_string, 1) = "*" Then Exit Function
-    If Left(operator_string, 1) = "/" Then Exit Function
-    If Left(operator_string, 1) = "^" Then Exit Function
-    If Left(operator_string, 1) = "&" Then Exit Function
+        
+    Dim o
+    For Each o In Operators
+        If Left(operator_string, Len(o)) = o Then Exit Function
+    Next
+    
     IsOperator = False
 End Function
+
+Private Property Get Operators()
+    Operators = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
+                      " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
+                      "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
+End Property
 
 Private Function SetCallByNameValue(called_object, called_proc_name As String, ByRef return_value, Optional args As Variant) As Boolean
     If IsMissing(args) Then
@@ -267,6 +268,7 @@ Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
     If isObj Then Set buffer_value = unverified_value Else buffer_value = unverified_value
 End Function
 
+
 ' "1 + 1 + 1"  -> 3
 Private Function RunEvaluate(non_parentheses_formula_str) As Variant
     Dim result_value
@@ -279,9 +281,7 @@ Private Function CalculateByAllOperators(string_has_operator)
     Dim i As Long, operator_strings, o, formular_info(0 To 2)
     
     ' note: element arrangement in array equal calaculated order
-    operator_strings = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
-                " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
-                "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
+    operator_strings = Operators
     
 On Error GoTo errSplitByOperator
     For Each o In operator_strings
