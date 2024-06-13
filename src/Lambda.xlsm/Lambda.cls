@@ -49,6 +49,8 @@ End Sub
 Private Function AddTag(unverfied_value, re_value)
     If IsObject(unverfied_value) Then
         Set re_value = unverfied_value
+    ElseIf IsNumeric(unverfied_value) Then
+        re_value = val(unverfied_value)
     Else
         Select Case VarType(unverfied_value)
             Case vbString: re_value = ConvertAsString(unverfied_value)
@@ -85,6 +87,7 @@ Private Function GetFormulaString(lambda_string As String) As String
     GetFormulaString = formula_string
 End Function
 
+' example) "x.abc(1 + 1)" -> "x.abc(2)",   "(1 + 3) * 3"-> "4 * 3"
 Private Function ParseParentheses(eval_var, var_string As String, formula_string As String) As String
     Dim formula_stack As Collection, current_str As String, char As String, i As Long, calculated_value
     Set formula_stack = New Collection
@@ -196,6 +199,7 @@ Private Function TryConvertMonomialToValue(eval_var, monominal_string As String,
         Next i
     End If
     
+    AddTag return_value, return_value
     If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
 End Function
 
@@ -360,7 +364,6 @@ Private Function GetTagLength(str) As Long
     If Left(str, Len(TAG_STRING_OPEN)) = TAG_STRING_OPEN Then _
         GetTagLength = InStr(str, TAG_STRING_CLOSE) + Len(TAG_STRING_CLOSE)
 End Function
-
 
 
 Private Function ConvertAsString(converted_string) As String
