@@ -26,7 +26,6 @@ Attribute Evaluate.VB_UserMemId = 0
     Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
         
 On Error GoTo errEvaluate
-'    If IsObject(evaluating_variable) Then Set eval_var = evaluating_variable Else Let eval_var = evaluating_variable
     Call AddTag(evaluating_variable, eval_var)
 
     Call ValidateLambdaString(lambda_string)
@@ -46,7 +45,6 @@ End Function
 Private Sub ValidateLambdaString(lambda_string As String)
     If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
 End Sub
-
 
 Private Function AddTag(unverfied_value, re_value)
     If IsObject(unverfied_value) Then
@@ -68,8 +66,6 @@ Private Function RemoveTags(unverfied_value, re_value)
         End Select
     End If
 End Function
-
-
 
 Private Function GetVarString(lambda_string As String) As String
     Dim var_string As String
@@ -274,12 +270,12 @@ End Function
 ' "1 + 1 + 1"  -> 3
 Private Function RunEvaluate(non_parentheses_formula_str) As Variant
     Dim result_value
-    result_value = SplitByOperator(non_parentheses_formula_str)
+    result_value = CalculateByAllOperators(non_parentheses_formula_str)
     RunEvaluate = result_value
 End Function
 
-' "1 + 2 + 3"  -> 6
-Private Function SplitByOperator(string_has_operator)
+' "1 + 2 * 2"  -> 5 (calculate all operaters. related with CalculateByOperator())
+Private Function CalculateByAllOperators(string_has_operator)
     Dim i As Long, operator_strings, o, formular_info(0 To 2)
     
     ' note: element arrangement in array equal calaculated order
@@ -289,19 +285,18 @@ Private Function SplitByOperator(string_has_operator)
     
 On Error GoTo errSplitByOperator
     For Each o In operator_strings
-        SplitByOperator = CalculateByOperator(string_has_operator, o)
-        If IsEmpty(SplitByOperator) = False Then Exit Function
+        CalculateByAllOperators = CalculateByOperator(string_has_operator, o)
+        If IsEmpty(CalculateByAllOperators) = False Then Exit Function
     Next
     
-    If IsNumeric(string_has_operator) Then SplitByOperator = val(string_has_operator) Else SplitByOperator = string_has_operator
+    If IsNumeric(string_has_operator) Then CalculateByAllOperators = val(string_has_operator) Else CalculateByAllOperators = string_has_operator
     Exit Function
     
 errSplitByOperator:
-   Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.SplitByOperator(" & string_has_operator & ")", Err.Description & vbCrLf & "failed to split by operator"
-    
+   Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.CalculateByAllOperators(" & string_has_operator & ")", Err.Description & vbCrLf & "failed to split by operator"
 End Function
  
-' "1 + 2 + 3"  -> 6
+' "1 + 2 * 2"  -> 1 + 4  (calculate only an operator. related with CalculateByAllOperators())
 Private Function CalculateByOperator(string_has_operator, o)
     Dim i As Long, vl, vr
 
@@ -310,9 +305,9 @@ On Error GoTo errCalculate
         i = i + GetTagLength(Mid(string_has_operator, i))
     
         If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
-            vl = SplitByOperator(Left(string_has_operator, i - 1))
-            vr = SplitByOperator(Mid(string_has_operator, i + Len(o)))
-            CalculateByOperator = CalculateOperator(operator_string:=o, left_value:=vl, right_value:=vr)
+            vl = CalculateByAllOperators(Left(string_has_operator, i - 1))
+            vr = CalculateByAllOperators(Mid(string_has_operator, i + Len(o)))
+            CalculateByOperator = CalculateOperator(operator_string:=o, left_value:=Trim(vl), right_value:=Trim(vr))
             Exit Function
         End If
     Next i
@@ -322,11 +317,9 @@ errCalculate:
     Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.CalculateByOperator(" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
 End Function
 
-' 1 + 2  -> 3
+' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value
-    left_value = Trim(left_value)
-    right_value = Trim(right_value)
     If IsNumeric(left_value) Then left_value = val(left_value)
     If IsNumeric(right_value) Then right_value = val(right_value)
 
