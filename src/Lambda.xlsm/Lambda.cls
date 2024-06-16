@@ -15,6 +15,11 @@ Option Explicit
 ' Version   : 0.2.0
 ' ---
 ' try to simply calculate by not using Evaluate().
+
+' unsupported
+'  - array
+'  - multi arguments
+'  - multi lines
 ' ----------------------------------------------------
 
 Private Const TAG_STRING_OPEN As String = "<string "
@@ -42,6 +47,8 @@ On Error GoTo errEvaluate
 errEvaluate:
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
 End Function
+
+
 
 'Private ---------------------------------------------
 Private Sub ValidateLambdaString(lambda_string As String)
@@ -97,16 +104,15 @@ Private Function ParseParentheses(eval_var, var_string As String, formula_string
     ParseParentheses = current_str
 End Function
 
-
-' example) "x.abc" -> x.abc or "x.abc.def" -> 3,   "x.abc + x.abc.def" -> x.abc + 3 (error)
+' example) "x.abc" -> x.abc,  "x.abc.def" -> 3,   "x.abc + x.abc.def" -> x.abc + 3 (error)
 Private Function TryConvertPolynominalToValue(eval_var, var_str As String, formula_str As String, ByRef return_value) As Boolean
 
     If InStrOperator(formula_str, 1) > 0 Then
-        ' polynominal
+        ' has operator -> polynominal
         return_value = ConvertPolynomialToValue(eval_var, var_str, formula_str)
         TryConvertPolynominalToValue = False
     Else
-        ' monominal
+        ' nothing operator ->  monominal
         TryConvertPolynominalToValue = TryConvertMonomialToValue(eval_var, var_str, formula_str, return_value)
     End If
     
@@ -183,14 +189,25 @@ Private Function TryConvertMonomialToValue(eval_var, var_str As String, monomina
     If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
 End Function
 
+Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
+    Dim i As Long, str As String
+    
+    str = Mid(string_has_operator, start_index)
+    For i = start_index To Len(string_has_operator)
+        i = i + GetTagLength(str)
+        str = Mid(string_has_operator, i)
+        If Left(str, Len(o)) = o Then InStrOperatorBy = i: Exit Function
+    Next i
+    InStrOperatorBy = 0
+End Function
+
 Private Function InStrOperator(string_has_operator, start_index) As Long
     Dim i As Long, str As String
     
+    str = Mid(string_has_operator, start_index)
     For i = start_index To Len(string_has_operator)
-        str = Mid(string_has_operator, i)
-        
         i = i + GetTagLength(str)
-        
+        str = Mid(string_has_operator, i)
         If IsOperator(str) Then InStrOperator = i: Exit Function
     Next i
     InStrOperator = 0
@@ -253,54 +270,31 @@ Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
 End Function
 
 
-' "1 + 1 + 1"  -> 3
-Private Function RunEvaluate(non_parentheses_formula_str) As Variant
-    Dim result_value
-    
-    result_value = CalculateByAllOperators(non_parentheses_formula_str)
-    RunEvaluate = result_value
-End Function
-
-' "1 + 2 * 2"  -> 5 (calculate all operaters. related with CalculateByOperator())
-Private Function CalculateByAllOperators(string_has_operator)
-    Dim i As Long, operator_strings, o, formular_info(0 To 2)
-    
-    ' note: element arrangement in array equal calaculated order
-    operator_strings = Operators
-    
-On Error GoTo errSplitByOperator
-    For Each o In operator_strings
-        CalculateByAllOperators = CalculateByOperator(string_has_operator, o)
-        If IsEmpty(CalculateByAllOperators) = False Then Exit Function
-    Next
-    
-    If IsNumeric(string_has_operator) Then CalculateByAllOperators = val(string_has_operator) Else CalculateByAllOperators = string_has_operator
-    Exit Function
-    
-errSplitByOperator:
-   Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.CalculateByAllOperators(" & string_has_operator & ")", Err.Description & vbCrLf & "failed to split by operator"
-End Function
- 
-' "1 + 2 * 2"  -> 1 + 4  (calculate only an operator. related with CalculateByAllOperators())
-Private Function CalculateByOperator(string_has_operator, o)
-    Dim i As Long, vl, vr
+' "1 + 2 * 2"  -> 1 + 4 -> 5 (calculate each operators.(recursively called by self))
+Private Function RunEvaluate(string_has_operator)
+    Dim i As Long, o, vl, vr
 
 On Error GoTo errCalculate
-    ' todo find opelator and then if found calculate
-    For i = 1 To Len(string_has_operator)
-        i = i + GetTagLength(Mid(string_has_operator, i))
     
-        If o = Mid(string_has_operator, i, 1) Or o = Mid(string_has_operator, i, 2) Or o = Mid(string_has_operator, i, 3) Or o = Mid(string_has_operator, i, 4) Or o = Mid(string_has_operator, i, 5) Or o = Mid(string_has_operator, i, 6) Then
-            vl = CalculateByAllOperators(Left(string_has_operator, i - 1))
-            vr = CalculateByAllOperators(Mid(string_has_operator, i + Len(o)))
-            CalculateByOperator = CalculateOperator(operator_string:=o, left_value:=Trim(vl), right_value:=Trim(vr))
-            Exit Function
-        End If
-    Next i
+    For Each o In Operators
+    
+        i = InStrOperatorBy(string_has_operator, 1, o)
+        If i < 1 Then GoTo nextloop
+        
+        ' found matched operator
+        vl = RunEvaluate(Left(string_has_operator, i - 1))
+        vr = RunEvaluate(Mid(string_has_operator, i + Len(o)))
+        RunEvaluate = CalculateOperator(operator_string:=o, left_value:=Trim(vl), right_value:=Trim(vr))
+        Exit Function
+nextloop:
+    Next
+    
+    ' not found matched operator
+    RunEvaluate = string_has_operator
     Exit Function
     
 errCalculate:
-    Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.CalculateByOperator(" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
+    Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.RunEvaluate(" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
 End Function
 
 ' 1 + 4  -> 5
@@ -343,12 +337,6 @@ errCalc:
     Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
 End Function
 
-Private Function GetTagLength(str) As Long
-    GetTagLength = 0
-    If Left(str, Len("<")) = "<" Then GetTagLength = InStr(str, "/>") + Len("/>") - 1
-End Function
-
-
 
 Private Function AddTag(unverfied_value, re_value)
     If IsObject(unverfied_value) Then
@@ -365,6 +353,7 @@ Private Function AddTag(unverfied_value, re_value)
         re_value = unverfied_value
     End If
 End Function
+
 Private Function RemoveTags(unverfied_value, re_value)
     If IsObject(unverfied_value) Then
         Set re_value = unverfied_value
@@ -388,8 +377,13 @@ End Function
 Private Function AddTagAs(converting_string, tag_open, tag_close) As String
     If Left(converting_string, 1) = "<" And Right(converting_string, 2) = "/>" Then AddTagAs = converting_string Else AddTagAs = tag_open & converting_string & tag_close
 End Function
+
 Private Function RemoveTagAs(deconverting_string, tag_open, tag_close)
     If Left(deconverting_string, 1) = "<" And Right(deconverting_string, 2) = "/>" Then RemoveTagAs = Replace(Replace(deconverting_string, tag_open, ""), tag_close, "") Else RemoveTagAs = deconverting_string
 End Function
 
+Private Function GetTagLength(str) As Long
+    GetTagLength = 0
+    If Left(str, Len("<")) = "<" Then GetTagLength = InStr(str, "/>") + Len("/>") - 1
+End Function
 
