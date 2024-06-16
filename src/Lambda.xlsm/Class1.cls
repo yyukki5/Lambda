@@ -28,6 +28,19 @@ End Property
 Property Get IsCls2(cls2 As Class2)
     IsCls2 = cls2.def
 End Property
+Property Get TheArray()
+    TheArray = Array(1, 2, 3)
+End Property
+Property Get TheArray2()
+    Dim arr2(1 To 2, 1 To 5)
+    Dim i, j
+    For i = LBound(arr2, 1) To UBound(arr2, 1)
+        For j = LBound(arr2, 2) To UBound(arr2, 2)
+            arr2(i, j) = i * j
+        Next j
+    Next i
+    TheArray2 = arr2
+End Property
 
 
 Function Init(a) As Class1

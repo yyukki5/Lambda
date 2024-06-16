@@ -17,7 +17,6 @@ Option Explicit
 ' try to simply calculate by not using Evaluate().
 
 ' unsupported
-'  - array
 '  - multi arguments
 '  - multi lines
 ' ----------------------------------------------------
@@ -55,6 +54,7 @@ Private Sub ValidateLambdaString(lambda_string As String)
     If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
 End Sub
 
+' "x => x+1" -> "x"
 Private Function GetVarString(lambda_string As String) As String
     Dim var_string As String
     
@@ -64,6 +64,7 @@ Private Function GetVarString(lambda_string As String) As String
     GetVarString = var_string
 End Function
 
+' "x => x+1" -> "x+1"
 Private Function GetFormulaString(lambda_string As String) As String
     Dim formula_string As String
     
@@ -155,9 +156,9 @@ Private Function ConvertToPolynomialWithoutObject(eval_var, var_str As String, f
     ConvertToPolynomialWithoutObject = formula_str
 End Function
 
-
 ' example) "x.abc.def" -> 1
 Private Function TryConvertMonomialToValue(eval_var, var_str As String, monominal_string As String, ByRef return_value) As Boolean
+On Error GoTo errFunction
     Dim splited_by_dot, i, index_parenthes_open As Long
     
     monominal_string = Replace(monominal_string, " ", "")
@@ -165,6 +166,12 @@ Private Function TryConvertMonomialToValue(eval_var, var_str As String, monomina
     
     If UBound(splited_by_dot) = 0 Then
         If InStrOperator(CStr(monominal_string), 1) > 0 Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error.: " & monominal_string
+        
+        If VarType(eval_var) > vbArray Then
+            TryConvertMonomialToValue = TryGetArrayValueByString(eval_var, monominal_string, return_value)
+            Exit Function
+        End If
+        
         If Len(monominal_string) > Len(var_str) Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
         If IsObject(eval_var) Then Set return_value = eval_var Else return_value = eval_var
     Else
@@ -187,6 +194,62 @@ Private Function TryConvertMonomialToValue(eval_var, var_str As String, monomina
     
     AddTag return_value, return_value
     If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
+    Exit Function
+errFunction:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryConvertMonomialToValue()", Err.Description
+End Function
+
+Private Function SetCallByNameValue(called_object, called_proc_name As String, ByRef return_value, Optional args As Variant) As Boolean
+        Dim re
+    If IsMissing(args) Then
+        On Error GoTo errGetWithoutArg
+        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), return_value)
+        SetCallByNameValue = IsObject(return_value)
+        Exit Function
+errGetWithoutArg:
+        If Err.Number = 450 Then
+            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod), return_value)
+            SetCallByNameValue = IsObject(return_value)
+        ElseIf Err.Number = 438 Then
+            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
+        Else
+            Err.Raise Err.Number, Err.Source, Err.Description
+        End If
+    Else
+        On Error GoTo errGetWitArg
+        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet, args), return_value)
+        SetCallByNameValue = IsObject(return_value)
+        Exit Function
+errGetWitArg:
+        If Err.Number = 451 Then
+            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), re)
+            If VarType(re) > vbArray Then
+                SetCallByNameValue = TryGetArrayValueByParamstersString(re, args, return_value)
+            Else
+                Err.Raise Err.Number, Err.Source & "at Lambda.SetCallByNameValue(): Get method with arguments, not array ", Err.Description
+            End If
+        ElseIf Err.Number = 450 Then
+            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod, args), return_value)
+            SetCallByNameValue = IsObject(return_value)
+        ElseIf Err.Number = 438 Then
+            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
+        Else
+            Err.Raise Err.Number, Err.Source, Err.Description
+        End If
+    End If
+    Exit Function
+End Function
+
+Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
+    Dim isObj As Boolean
+    isObj = IsObject(unverified_value)
+    If isObj Then
+        Set buffer_value = unverified_value
+        SetObjectAsBuffer = True
+    Else
+        buffer_value = unverified_value
+        SetObjectAsBuffer = False
+    End If
 End Function
 
 Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
@@ -229,45 +292,6 @@ Private Property Get Operators()
                       " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
                       "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
 End Property
-
-Private Function SetCallByNameValue(called_object, called_proc_name As String, ByRef return_value, Optional args As Variant) As Boolean
-    If IsMissing(args) Then
-        On Error GoTo errGetWithoutArg
-        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), return_value)
-        SetCallByNameValue = IsObject(return_value)
-        Exit Function
-errGetWithoutArg:
-        If Err.Number = 450 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod), return_value)
-            SetCallByNameValue = IsObject(return_value)
-        ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
-        Else
-            Err.Raise Err.Number, Err.Source, Err.Description
-        End If
-    Else
-        On Error GoTo errGetWitArg
-        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet, args), return_value)
-        SetCallByNameValue = IsObject(return_value)
-        Exit Function
-errGetWitArg:
-        If Err.Number = 450 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod, args), return_value)
-            SetCallByNameValue = IsObject(return_value)
-        ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
-        Else
-            Err.Raise Err.Number, Err.Source, Err.Description
-        End If
-    End If
-    Exit Function
-End Function
-
-Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
-    Dim isObj As Boolean
-    isObj = IsObject(unverified_value)
-    If isObj Then Set buffer_value = unverified_value Else buffer_value = unverified_value
-End Function
 
 
 ' "1 + 2 * 2"  -> 1 + 4 -> 5 (calculate each operators.(recursively called by self))
@@ -366,7 +390,7 @@ Private Function RemoveTags(unverfied_value, re_value)
         If HasTagBy(unverfied_value, TAG_STRING_OPEN) Then re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
     Else
         re_value = unverfied_value
-        Debug.Print "(RemoveTags()) unexpected value:" & unverfied_value
+'        Debug.Print "(RemoveTags()) unexpected value:" & unverfied_value
     End If
 End Function
 
@@ -385,5 +409,45 @@ End Function
 Private Function GetTagLength(str) As Long
     GetTagLength = 0
     If Left(str, Len("<")) = "<" Then GetTagLength = InStr(str, "/>") + Len("/>") - 1
+End Function
+
+' related arrays -------------------------------
+Private Function TryGetArrayValueByString(arr, array_sting, reval) As Boolean
+    Dim pstr As String, parr
+    If IsArrayHasArgument(array_sting) Then
+        pstr = ExtructArrayParametersString(array_sting)
+        TryGetArrayValueByString = TryGetArrayValueByParamstersString(arr, pstr, reval)
+    Else
+        reval = arr
+        TryGetArrayValueByString = True
+    End If
+End Function
+Private Function TryGetArrayValueByParamstersString(arr, parameter_sting, reval) As Boolean
+        Dim pstr As String, parr
+        parr = GetArrayParametersByString(parameter_sting)
+        TryGetArrayValueByParamstersString = TryGetArrayValue(arr, parr, reval)
+End Function
+Private Function IsArrayHasArgument(array_string) As Boolean
+    IsArrayHasArgument = InStr(array_string, "(") > 0
+End Function
+Private Function ExtructArrayParametersString(array_sting) As String
+    ExtructArrayParametersString = Mid(array_sting, InStr(array_sting, "(") + 1, InStr(array_sting, ")") - 1 - InStr(array_sting, "("))
+End Function
+Private Function GetArrayParametersByString(parameters_sting)
+    GetArrayParametersByString = Split(parameters_sting, ",")
+End Function
+Private Function TryGetArrayValue(arr, p, reval) As Boolean
+On Error GoTo errArray
+    Dim rnk As Long: rnk = UBound(p) - LBound(p) + 1
+    Select Case rnk
+        Case 1: TryGetArrayValue = SetObjectAsBuffer(arr(p(0)), reval)
+        Case 2: TryGetArrayValue = SetObjectAsBuffer(arr(p(0), p(1)), reval)
+        Case 3: TryGetArrayValue = SetObjectAsBuffer(arr(p(0), p(1), p(2)), reval)
+        Case Else
+            Err.Raise 9009, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", "unsupported dimension array"
+    End Select
+    Exit Function
+errArray:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", Err.Description
 End Function
 
