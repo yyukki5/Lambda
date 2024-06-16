@@ -19,6 +19,8 @@ Option Explicit
 
 Private Const TAG_STRING_OPEN As String = "<string "
 Private Const TAG_STRING_CLOSE As String = " string/>"
+Private Const TAG_DATE_OPEN As String = "<date "
+Private Const TAG_DATE_CLOSE As String = " date/>"
 
 
 Public Function Evaluate(evaluating_variable, lambda_string As String)
@@ -45,29 +47,6 @@ End Function
 Private Sub ValidateLambdaString(lambda_string As String)
     If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
 End Sub
-
-Private Function AddTag(unverfied_value, re_value)
-    If IsObject(unverfied_value) Then
-        Set re_value = unverfied_value
-    ElseIf IsNumeric(unverfied_value) Then
-        re_value = val(unverfied_value)
-    Else
-        Select Case VarType(unverfied_value)
-            Case vbString: re_value = ConvertAsString(unverfied_value)
-            Case Else:     re_value = unverfied_value
-        End Select
-    End If
-End Function
-Private Function RemoveTags(unverfied_value, re_value)
-    If IsObject(unverfied_value) Then
-        Set re_value = unverfied_value
-    Else
-        Select Case VarType(unverfied_value)
-            Case vbString: re_value = DeconvertAsString(unverfied_value)
-            Case Else:     re_value = unverfied_value
-        End Select
-    End If
-End Function
 
 Private Function GetVarString(lambda_string As String) As String
     Dim var_string As String
@@ -128,7 +107,7 @@ Private Function TryConvertPolynominalToValue(eval_var, var_str As String, formu
         TryConvertPolynominalToValue = False
     Else
         ' monominal
-        TryConvertPolynominalToValue = TryConvertMonomialToValue(eval_var, formula_str, return_value)
+        TryConvertPolynominalToValue = TryConvertMonomialToValue(eval_var, var_str, formula_str, return_value)
     End If
     
 End Function
@@ -159,7 +138,7 @@ Private Function ConvertToPolynomialWithoutObject(eval_var, var_str As String, f
         last_index = IIf(InStrOperator(formula_str, start_index) = 0, Len(formula_str), InStrOperator(formula_str, start_index) - 1)
         term_string = Mid(formula_str, start_index, last_index - start_index + 1)
     
-        Call TryConvertMonomialToValue(eval_var, term_string, buf_val)
+        Call TryConvertMonomialToValue(eval_var, var_str, term_string, buf_val)
     
         If IsObject(buf_val) Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Failed to evaluate, converted as object"
         If VarType(buf_val) > vbArray Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Unsupport array for evaluate"
@@ -172,14 +151,15 @@ End Function
 
 
 ' example) "x.abc.def" -> 1
-Private Function TryConvertMonomialToValue(eval_var, monominal_string As String, ByRef return_value) As Boolean
+Private Function TryConvertMonomialToValue(eval_var, var_str As String, monominal_string As String, ByRef return_value) As Boolean
     Dim splited_by_dot, i, index_parenthes_open As Long
     
     monominal_string = Replace(monominal_string, " ", "")
     splited_by_dot = Split(monominal_string, ".")
     
     If UBound(splited_by_dot) = 0 Then
-        If InStrOperator(CStr(monominal_string), 1) > 0 Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error."
+        If InStrOperator(CStr(monominal_string), 1) > 0 Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error.: " & monominal_string
+        If Len(monominal_string) > Len(var_str) Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
         If IsObject(eval_var) Then Set return_value = eval_var Else return_value = eval_var
     Else
         Set return_value = eval_var
@@ -276,6 +256,7 @@ End Function
 ' "1 + 1 + 1"  -> 3
 Private Function RunEvaluate(non_parentheses_formula_str) As Variant
     Dim result_value
+    
     result_value = CalculateByAllOperators(non_parentheses_formula_str)
     RunEvaluate = result_value
 End Function
@@ -305,6 +286,7 @@ Private Function CalculateByOperator(string_has_operator, o)
     Dim i As Long, vl, vr
 
 On Error GoTo errCalculate
+    ' todo find opelator and then if found calculate
     For i = 1 To Len(string_has_operator)
         i = i + GetTagLength(Mid(string_has_operator, i))
     
@@ -323,9 +305,9 @@ End Function
 
 ' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
-    Dim calculated_value
-    If IsNumeric(left_value) Then left_value = val(left_value)
-    If IsNumeric(right_value) Then right_value = val(right_value)
+    Dim calculated_value, removed_tag_left, removed_tag_right
+    RemoveTags left_value, left_value
+    RemoveTags right_value, right_value
 
 On Error GoTo errCalc
     Select Case operator_string
@@ -353,7 +335,9 @@ On Error GoTo errCalc
         Case " Is ": calculated_value = left_value Is right_value
     End Select
     
-    CalculateOperator = calculated_value
+    Dim calculated_value_with_tag
+    AddTag calculated_value, calculated_value_with_tag
+    CalculateOperator = calculated_value_with_tag
     Exit Function
 errCalc:
     Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
@@ -361,14 +345,51 @@ End Function
 
 Private Function GetTagLength(str) As Long
     GetTagLength = 0
-    If Left(str, Len(TAG_STRING_OPEN)) = TAG_STRING_OPEN Then _
-        GetTagLength = InStr(str, TAG_STRING_CLOSE) + Len(TAG_STRING_CLOSE)
+    If Left(str, Len("<")) = "<" Then GetTagLength = InStr(str, "/>") + Len("/>") - 1
 End Function
 
 
-Private Function ConvertAsString(converted_string) As String
-    If InStr(converted_string, TAG_STRING_OPEN) > 0 Then ConvertAsString = converted_string Else ConvertAsString = TAG_STRING_OPEN & converted_string & TAG_STRING_CLOSE
+
+Private Function AddTag(unverfied_value, re_value)
+    If IsObject(unverfied_value) Then
+        Set re_value = unverfied_value
+    ElseIf IsDate(unverfied_value) Then
+        re_value = AddTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE)
+    ElseIf VarType(unverfied_value) = vbBoolean Then
+        re_value = unverfied_value
+    ElseIf IsNumeric(unverfied_value) Then
+        re_value = val(unverfied_value)
+    ElseIf VarType(unverfied_value) = vbString Then
+        re_value = AddTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+    Else
+        re_value = unverfied_value
+    End If
 End Function
-Private Function DeconvertAsString(deconverted_string)
-    If InStr(deconverted_string, TAG_STRING_OPEN) > 0 Then DeconvertAsString = Replace(Replace(deconverted_string, TAG_STRING_OPEN, ""), TAG_STRING_CLOSE, "")
+Private Function RemoveTags(unverfied_value, re_value)
+    If IsObject(unverfied_value) Then
+        Set re_value = unverfied_value
+    ElseIf VarType(unverfied_value) = vbBoolean Then
+        re_value = unverfied_value
+    ElseIf IsNumeric(unverfied_value) Then
+        re_value = val(unverfied_value)
+    ElseIf VarType(unverfied_value) = vbString Then
+        If HasTagBy(unverfied_value, TAG_DATE_OPEN) Then re_value = DateValue(RemoveTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE))
+        If HasTagBy(unverfied_value, TAG_STRING_OPEN) Then re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+    Else
+        re_value = unverfied_value
+        Debug.Print "(RemoveTags()) unexpected value:" & unverfied_value
+    End If
 End Function
+
+Private Function HasTagBy(str, ope) As Boolean
+    If Left(str, Len(ope)) = ope Then HasTagBy = True Else HasTagBy = False
+End Function
+
+Private Function AddTagAs(converting_string, tag_open, tag_close) As String
+    If Left(converting_string, 1) = "<" And Right(converting_string, 2) = "/>" Then AddTagAs = converting_string Else AddTagAs = tag_open & converting_string & tag_close
+End Function
+Private Function RemoveTagAs(deconverting_string, tag_open, tag_close)
+    If Left(deconverting_string, 1) = "<" And Right(deconverting_string, 2) = "/>" Then RemoveTagAs = Replace(Replace(deconverting_string, tag_open, ""), tag_close, "") Else RemoveTagAs = deconverting_string
+End Function
+
+
