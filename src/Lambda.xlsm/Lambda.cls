@@ -30,27 +30,27 @@ Private var_
 Private lambdaString_ As String
 
 Public Function Initialize(var, lambda_string As String) As Lambda
-    Attribute Initialize.VB_UserMemId = 0
+Attribute Initialize.VB_UserMemId = 0
     Call SetObjectAsBuffer(var, var_)
     lambdaString_ = lambda_string
     Set Initialize = Me
 End Function
 
-Public Function Evaluate(evaluating_variable, lambda_string As String)
+Public Function Evaluate()
     Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
 
     On Error GoTo errEvaluate
-    Call AddTag(evaluating_variable, eval_var)
+    Call AddTag(var_, eval_var)
 
-    Call ValidateLambdaString(lambda_string)
-    var_string = GetVarString(lambda_string)
-    formula_string = GetFormulaString(lambda_string)
-
+    Call ValidateLambdaString(lambdaString_)
+    var_string = GetVarString(lambdaString_)
+    formula_string = GetFormulaString(lambdaString_)
+    
     parsed_string = ParseParentheses(eval_var, var_string, formula_string)
     Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, evaluated_value)
     Call RemoveTags(evaluated_value, Evaluate)
     Exit Function
-
+    
 errEvaluate:
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
 End Function
