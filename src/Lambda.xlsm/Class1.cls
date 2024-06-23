@@ -15,7 +15,7 @@ Private def_ As Class2
 Property Get abc()
     abc = abc_
 End Property
-Property Get def()
+Property Get def() As Class2
     Set def = def_
 End Property
 Property Get parg(arg)

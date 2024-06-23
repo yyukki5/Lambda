@@ -12,7 +12,7 @@ Option Explicit
 
 ' ----------------------------------------------------
 ' Project   : https://github.com/yyukki5/Lambda
-' Version   : 0.2.0
+' Version   : 0.3.0
 ' ---
 ' try to simply calculate by not using Evaluate().
 
@@ -26,17 +26,25 @@ Private Const TAG_STRING_CLOSE As String = " string/>"
 Private Const TAG_DATE_OPEN As String = "<date "
 Private Const TAG_DATE_CLOSE As String = " date/>"
 
+Private var_
+Private lambdaString_ As String
 
-Public Function Evaluate(evaluating_variable, lambda_string As String)
-Attribute Evaluate.VB_UserMemId = 0
+Public Function Initialize(var, lambda_string As String) As Lambda
+Attribute Initialize.VB_UserMemId = 0
+    Call SetObjectAsBuffer(var, var_)
+    lambdaString_ = lambda_string
+    Set Initialize = Me
+End Function
+
+Public Function Evaluate()
     Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
-        
-On Error GoTo errEvaluate
-    Call AddTag(evaluating_variable, eval_var)
 
-    Call ValidateLambdaString(lambda_string)
-    var_string = GetVarString(lambda_string)
-    formula_string = GetFormulaString(lambda_string)
+    On Error GoTo errEvaluate
+    Call AddTag(var_, eval_var)
+
+    Call ValidateLambdaString(lambdaString_)
+    var_string = GetVarString(lambdaString_)
+    formula_string = GetFormulaString(lambdaString_)
     
     parsed_string = ParseParentheses(eval_var, var_string, formula_string)
     Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, evaluated_value)
