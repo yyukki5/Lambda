@@ -26,13 +26,16 @@ Private Const TAG_STRING_CLOSE As String = " string/>"
 Private Const TAG_DATE_OPEN As String = "<date "
 Private Const TAG_DATE_CLOSE As String = " date/>"
 
-Private var_
+Private vars_
 Private lambdaString_ As String
 
 Public Function Initialize(var, lambda_string As String) As Lambda
 Attribute Initialize.VB_UserMemId = 0
-    Call SetObjectAsBuffer(var, var_)
-    lambdaString_ = lambda_string
+    Call ValidateLambdaString(lambda_string)
+    
+    lambdaString_ = GetFormulaString(lambda_string)
+    Set vars_ = GetVars(var, GetVarStrings(lambda_string))
+    
     Set Initialize = Me
 End Function
 
@@ -40,14 +43,9 @@ Public Function Evaluate()
     Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
 
     On Error GoTo errEvaluate
-    Call AddTag(var_, eval_var)
-
-    Call ValidateLambdaString(lambdaString_)
-    var_string = GetVarString(lambdaString_)
-    formula_string = GetFormulaString(lambdaString_)
-    
-    parsed_string = ParseParentheses(eval_var, var_string, formula_string)
-    Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, evaluated_value)
+    formula_string = lambdaString_
+    parsed_string = ParseParentheses(formula_string)
+    Call TryConvertPolynominalToValue(parsed_string, evaluated_value)
     Call RemoveTags(evaluated_value, Evaluate)
     Exit Function
     
@@ -58,18 +56,50 @@ End Function
 
 
 'Private ---------------------------------------------
+Private Function IsMonomical(formula_string) As Boolean
+    IsMonomical = InStrOperator(formula_string, 1) < 1
+End Function
+
+
+Private Function GetVars(eval_vars, var_strings) As Collection
+    Dim i As Long, col As New Collection
+    
+    If IsArray(eval_vars) = False Then
+        col.Add Array(eval_vars, var_strings)
+    Else
+        var_strings = Split(var_strings, ",")
+        If ArrayCount(var_strings) = 1 Then
+            col.Add Array(eval_vars, var_strings(LBound(var_strings)))
+        Else
+            For i = LBound(eval_vars) To UBound(eval_vars)
+                col.Add Array(eval_vars(i), var_strings(i))
+            Next i
+        End If
+    End If
+    Set GetVars = col
+End Function
+
+Private Function GetEvalVars(var)
+    If IsArray(var) Then
+        GetEvalVars = var
+    Else
+        GetEvalVars = Array(var)
+    End If
+End Function
+
 Private Sub ValidateLambdaString(lambda_string As String)
     If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
 End Sub
 
 ' "x => x+1" -> "x"
-Private Function GetVarString(lambda_string As String) As String
-    Dim var_string As String
+Private Function GetVarStrings(lambda_string As String)
+    Dim var_string As String, var_strings
     
     var_string = Mid(lambda_string, 1, InStr(lambda_string, "=>") - 1)
+    var_string = Replace(Replace(Replace(var_string, "(", ""), ")", ""), " ", "")
     If Len(var_string) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
-    
-    GetVarString = var_string
+            
+    GetVarStrings = var_string
 End Function
 
 ' "x => x+1" -> "x+1"
@@ -83,7 +113,7 @@ Private Function GetFormulaString(lambda_string As String) As String
 End Function
 
 ' example) "x.abc(1 + 1)" -> "x.abc(2)",   "(1 + 3) * 3"-> "4 * 3"
-Private Function ParseParentheses(eval_var, var_string As String, formula_string As String) As String
+Private Function ParseParentheses(formula_string As String) As String
     Dim formula_stack As Collection, current_str As String, char As String, i As Long, calculated_value
     Set formula_stack = New Collection
 
@@ -96,7 +126,7 @@ Private Function ParseParentheses(eval_var, var_string As String, formula_string
         
         ElseIf char = ")" Then
             ' after close parenthese ----------
-            calculated_value = ConvertPolynomialToValue(eval_var, var_string, current_str)
+            calculated_value = ConvertPolynomialToValue(current_str)
             
             If formula_stack.Count > 0 Then
                 current_str = formula_stack.Item(formula_stack.Count) & "(" & calculated_value & ")"
@@ -114,25 +144,25 @@ Private Function ParseParentheses(eval_var, var_string As String, formula_string
 End Function
 
 ' example) "x.abc" -> x.abc,  "x.abc.def" -> 3,   "x.abc + x.abc.def" -> x.abc + 3 (error)
-Private Function TryConvertPolynominalToValue(eval_var, var_str As String, formula_str As String, ByRef return_value) As Boolean
+Private Function TryConvertPolynominalToValue(formula_str As String, ByRef return_value) As Boolean
 
-    If InStrOperator(formula_str, 1) > 0 Then
+    If IsMonomical(formula_str) = False Then
         ' has operator -> polynominal
-        return_value = ConvertPolynomialToValue(eval_var, var_str, formula_str)
+        return_value = ConvertPolynomialToValue(formula_str)
         TryConvertPolynominalToValue = False
     Else
         ' nothing operator ->  monominal
-        TryConvertPolynominalToValue = TryConvertMonomialToValue(eval_var, var_str, formula_str, return_value)
+        TryConvertPolynominalToValue = TryConvertMonomialToValue(formula_str, return_value)
     End If
     
 End Function
 
 ' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1" -> 9
-Private Function ConvertPolynomialToValue(eval_var, var_str As String, formula_str As String) As Variant
+Private Function ConvertPolynomialToValue(formula_str As String) As Variant
     Dim calculated_value, calculated_string
     
-    If InStr(formula_str, var_str) > 0 Then
-        calculated_string = ConvertToPolynomialWithoutObject(eval_var, var_str, formula_str)
+    If HasVariable(formula_str) Then
+        calculated_string = ConvertToPolynomialWithoutObject(formula_str)
     Else
         calculated_string = formula_str
     End If
@@ -143,69 +173,106 @@ Private Function ConvertPolynomialToValue(eval_var, var_str As String, formula_s
     ConvertPolynomialToValue = calculated_value
 End Function
 
+Private Function HasVariable(formula_string As String) As Boolean
+    Dim v, f As Boolean
+    For Each v In vars_
+       If InStr(formula_string, v(1)) > 0 Then HasVariable = True: Exit Function
+    Next
+End Function
+Private Function HasVariableBy(formula_string As String, var_string As String) As Boolean
+    HasVariableBy = InStr(formula_string, var_string) > 0
+End Function
+
 ' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1"
-Private Function ConvertToPolynomialWithoutObject(eval_var, var_str As String, formula_str As String) As String
-    Dim start_index, last_index, term_string As String, buf_val
+Private Function ConvertToPolynomialWithoutObject(formula_str As String) As String
+    Dim monominal_string As String, buf_val, v, var_string As String
     
-    Do While InStr(formula_str, var_str) > 0
-    
-        start_index = InStr(formula_str, var_str)
-        last_index = IIf(InStrOperator(formula_str, start_index) = 0, Len(formula_str), InStrOperator(formula_str, start_index) - 1)
-        term_string = Mid(formula_str, start_index, last_index - start_index + 1)
-    
-        Call TryConvertMonomialToValue(eval_var, var_str, term_string, buf_val)
-    
-        If IsObject(buf_val) Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Failed to evaluate, converted as object"
-        If VarType(buf_val) > vbArray Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Unsupport array for evaluate"
-        
-        formula_str = Replace(formula_str, term_string, buf_val)
+    On Error GoTo errFor
+    Do While HasVariable(formula_str)
+        For Each v In vars_
+            var_string = v(1)
+            If HasVariableBy(formula_str, var_string) Then
+            
+                monominal_string = GetMonominalStringFromPolynomial(formula_str, var_string)
+                Call TryConvertMonomialToValue(monominal_string, buf_val)
+            
+                If IsObject(buf_val) Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Failed to evaluate, converted as object"
+                If VarType(buf_val) > vbArray Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Unsupport array for evaluate"
+                
+                formula_str = Replace(formula_str, monominal_string, buf_val)
+            End If
+        Next
     Loop
     
     ConvertToPolynomialWithoutObject = formula_str
+    Exit Function
+errFor:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ConvertToPolynomialWithoutObject()", Err.Description
 End Function
 
+Private Function GetMonominalStringFromPolynomial(polynomial_string, var_string) As String
+    Dim start_index, last_index, term_string As String
+    
+    start_index = InStr(polynomial_string, var_string)
+    last_index = IIf(InStrOperator(polynomial_string, start_index) = 0, Len(polynomial_string), InStrOperator(polynomial_string, start_index) - 1)
+    term_string = Mid(polynomial_string, start_index, last_index - start_index + 1)
+    
+    GetMonominalStringFromPolynomial = term_string
+End Function
+
+
 ' example) "x.abc.def" -> 1
-Private Function TryConvertMonomialToValue(eval_var, var_str As String, monominal_string As String, ByRef return_value) As Boolean
+Private Function TryConvertMonomialToValue(monominal_string As String, ByRef return_value) As Boolean
 On Error GoTo errFunction
-    Dim splited_by_dot, i, index_parenthes_open As Long
+    Dim splited_by_dot() As String, i, eval_var, var_str As String, v
+    
+    If HasOperator(monominal_string) Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error.: " & monominal_string
     
     monominal_string = Replace(monominal_string, " ", "")
-    splited_by_dot = Split(monominal_string, ".")
-    
-    If UBound(splited_by_dot) = 0 Then
-        If InStrOperator(CStr(monominal_string), 1) > 0 Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error.: " & monominal_string
-        
-        If VarType(eval_var) > vbArray Then
-            TryConvertMonomialToValue = TryGetArrayValueByString(eval_var, monominal_string, return_value)
-            Exit Function
-        End If
-        
-        If Len(monominal_string) > Len(var_str) Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
-        If IsObject(eval_var) Then Set return_value = eval_var Else return_value = eval_var
-    Else
-        Set return_value = eval_var
-        For i = 1 To UBound(splited_by_dot)
-            If splited_by_dot(i) = "" Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error."
-            
-            index_parenthes_open = InStr(splited_by_dot(i), "(")
-            If index_parenthes_open > 0 Then
-                Call SetCallByNameValue( _
-                    called_object:=return_value, _
-                    called_proc_name:=Left(splited_by_dot(i), index_parenthes_open - 1), _
-                    return_value:=return_value, _
-                    args:=Mid(splited_by_dot(i), index_parenthes_open + 1, InStr(splited_by_dot(i), ")") - index_parenthes_open - 1))
-            Else
-                Call SetCallByNameValue(return_value, CStr(splited_by_dot(i)), return_value)
+    If HasChildString(monominal_string) Then
+        splited_by_dot = Split(monominal_string, ".")
+        For Each v In vars_
+            If HasVariableBy(monominal_string, (v(1))) Then
+                Set return_value = v(0)
+                For i = 1 To UBound(splited_by_dot)
+                    If IsMethodPropOrArrayString(splited_by_dot(i)) Then
+                        Call SetCallByNameValue(return_value, GetProcName(splited_by_dot(i)), return_value, ExtructProcParamString(splited_by_dot(i)))
+                    Else
+                        Call SetCallByNameValue(return_value, splited_by_dot(i), return_value)
+                    End If
+                Next i
             End If
-        Next i
+        Next
+    Else
+        For Each v In vars_
+            If HasVariableBy(monominal_string, (v(1))) Then
+                If IsMethodPropOrArrayString(monominal_string) Then
+                    If IsArray(v(0)) Then ' arr(1)
+                        TryConvertMonomialToValue = TryGetArrayValueByString(v(0), monominal_string, return_value)
+                    Else
+                        Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
+                    End If
+                ElseIf monominal_string <> v(1) Then
+                    Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
+                Else ' x, 123
+                    SetObjectAsBuffer v(0), return_value
+                End If
+            End If
+        Next
     End If
-    
+
     AddTag return_value, return_value
     If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
     Exit Function
 errFunction:
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryConvertMonomialToValue()", Err.Description
 End Function
+
+Private Function HasChildString(monomical_string) As Boolean
+    HasChildString = (ArrayCount(Split(monomical_string, ".")) <> 1)
+End Function
+
+
 
 Private Function SetCallByNameValue(called_object, called_proc_name As String, ByRef return_value, Optional args As Variant) As Boolean
         Dim re
@@ -258,6 +325,10 @@ Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
         buffer_value = unverified_value
         SetObjectAsBuffer = False
     End If
+End Function
+
+Private Function HasOperator(string_has_operator As String) As Boolean
+    HasOperator = InStrOperator(string_has_operator, 1) > 0
 End Function
 
 Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
@@ -459,3 +530,23 @@ errArray:
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", Err.Description
 End Function
 
+Private Function ArrayCount(arr, Optional d As Long = 1) As Long
+    ArrayCount = UBound(arr, d) - LBound(arr, d) + 1
+End Function
+
+Private Function IsMethodPropOrArrayString(monomical_string) As Boolean
+    IsMethodPropOrArrayString = InStr(monomical_string, "(") > 0
+End Function
+
+
+Private Function GetProcName(function_string) As String
+    Dim index_parenthes_open
+    index_parenthes_open = InStr(function_string, "(")
+    If index_parenthes_open > 0 Then GetProcName = Left(function_string, index_parenthes_open - 1) Else GetProcName = function_string
+End Function
+
+Private Function ExtructProcParamString(function_string) As String
+    Dim index_parenthes_open
+    index_parenthes_open = InStr(function_string, "(")
+    ExtructProcParamString = Mid(function_string, index_parenthes_open + 1, InStr(function_string, ")") - index_parenthes_open - 1)
+End Function
