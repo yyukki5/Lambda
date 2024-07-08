@@ -34,16 +34,11 @@ Private Enum lmVarType
     lmVarTypeName
 End Enum
 
-Private Enum lmParseCase
-    lmNoFound
-    lmOperator
-    lmOpenParenthese
-    lmCloseParenthese
-End Enum
 Private Enum lmValueType
     lmIsOpe
     lmValue
 End Enum
+
 Private Enum lmPolynominalParseCase
     lmBlank
     lmOpe
@@ -65,7 +60,7 @@ End Function
 Public Function Evaluate()
     Dim evaluated_value, polynominal_collection As Collection
 
-'On Error GoTo errEvaluate
+On Error GoTo errEvaluate
     Call SetObjectAsBuffer(ParsePolynominal(lambdaString_), evaluated_value)
     Call RemoveTags(evaluated_value, Evaluate)
     Exit Function
@@ -343,51 +338,6 @@ Private Function SplitFirstOperator(ByVal str As String, left_string As String, 
 End Function
 
 
-
-
-
-
-
-
-
-
-Private Function ConvertInnerParenthesStringsToCollection(inner_string As String) As Collection
-    Dim inner_strings As Collection, inner_collection As New Collection
-    Dim polynominal_string, polynominal_collection As Collection
-    Dim reval
-        
-    Set inner_strings = SplitByComma(inner_string)
-    For Each polynominal_string In inner_strings
-        Set polynominal_collection = ParseString((polynominal_string))
-        Call EvaluetePolynominalCollection(polynominal_collection, reval)
-        Call inner_collection.Add(reval)
-    Next
-    Set ConvertInnerParenthesStringsToCollection = inner_collection
-    
-End Function
-
-Private Function SplitByOperatorOr1Char(ByVal str As String, left_str As String, right_str As String, ope) As lmParseCase
-    Dim start_index As Long, parenthese_or_other As String
-    
-    If IsOperator(str) Then
-        SplitByOperator str, ope, right_str
-        SplitByOperatorOr1Char = lmOperator
-    Else
-        start_index = GetTagSpanLengthWithStarted(str)
-        parenthese_or_other = Mid(str, start_index + 1, 1)
-        left_str = Left(str, start_index + 1)
-        right_str = Mid(str, start_index + 2)
-        ope = ""
-        
-        Select Case parenthese_or_other
-            Case "(": SplitByOperatorOr1Char = lmOpenParenthese
-            Case ")": SplitByOperatorOr1Char = lmCloseParenthese
-            Case Else: SplitByOperatorOr1Char = lmNoFound
-        End Select
-    End If
-    
-End Function
-
 Private Function SplitByComma(str As String) As Collection
     Dim i As Long, col As New Collection, tmp As String
     
@@ -403,27 +353,9 @@ Private Function SplitByComma(str As String) As Collection
     Set SplitByComma = col
 End Function
 
-Private Function ConvertToPolynominalCollectionFrom(polynominal_string As String) As Collection
-
-End Function
-
 Private Function SplitByOperator(str, ope, right_str)
     ope = TakeOperator(str)
     right_str = Mid(str, Len(ope) + 1)
-End Function
-
-Private Function ConvertToMonominalValueFrom(monminal_string As String) As Variant
-    Dim reval
-    TryConvertMonomialToValue monminal_string, ConvertToMonominalValueFrom
-    
-End Function
-
-Private Function EvaluatePreParentheses(inner_collection As Collection, pre, reval)
-        
-    If inner_collection.Count = 0 Then:    reval = Null: Exit Function
-    Call ConvertMonominalStringToValue((pre), Null, inner_collection, reval)
-    
-        
 End Function
 
 Private Function EvaluetePolynominalCollection(pc As Collection, reval)
@@ -437,32 +369,6 @@ Private Function EvaluetePolynominalCollection(pc As Collection, reval)
     End If
     
 End Function
-
-Private Function ConvertMonominalStringToValue(monominal_string As String, parent_val As Variant, args As Collection, reval As Variant)
-    Dim re As Variant
-    
-    If Trim(monominal_string) = "" Then
-        If IsEmpty(parent_val) Then
-            SetObjectAsEmpty reval:   Exit Function
-        Else
-            SetObjectAsBuffer parent_val, reval
-            Exit Function
-        End If
-    End If
-    
-    If args.Count = 0 Then
-        If Left(monominal_string, 1) = "." Then SetObjectAsBuffer CallByName(parent_val, Trim(Mid(monominal_string, 2)), VbGet), reval: Exit Function
-        TryConvertMonomialToValue monominal_string, reval
-    Else
-        ' todo improve to apply multi arguments
-        Call TryConvertMonomialToValue(monominal_string & args(1) & ")", reval)
-    
-    End If
-    
-
-
-End Function
-
 
 ' "1 + 2 * 2"  -> 1 + 4 -> 5 (calculate each operators.(recursively called by self))
 Private Function RunEvaluatePolynominalCollectionRec(pc As Collection)
@@ -508,58 +414,10 @@ nextloop:
     
 End Function
 
-
-
-
 Private Function SetObjectAsEmpty(reval)
     Dim re As Variant
     If IsObject(reval) Then Set reval = re Else reval = re
 End Function
-
-Private Function PushStack(pushed_stack As Collection, var As Variant)
-    pushed_stack.Add var
-End Function
-Private Function PopStack(poped_stack As Collection, var As Variant)
-    If poped_stack.Count > 0 Then
-        SetObjectAsBuffer poped_stack(poped_stack.Count), var
-        poped_stack.Remove poped_stack.Count
-    End If
-End Function
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Private Function IsMonomical(formula_string) As Boolean
-    IsMonomical = InStrOperator(formula_string, 1) < 1
-End Function
-
 
 Private Function GetVars(eval_vars, var_strings) As Collection
     Dim i As Long, col As New Collection
@@ -612,275 +470,6 @@ Private Function GetFormulaString(lambda_string As String) As String
     GetFormulaString = formula_string
 End Function
 
-' example) "x.abc(1 + 1)" -> "x.abc(2)",   "(1 + 3) * 3"-> "4 * 3"
-Private Function ParseParentheses(formula_string As String) As String
-    Dim current_str As String, char As String, i As Long, calculated_value
-    Dim formula_stack As Collection: Set formula_stack = New Collection
-
-    For i = 1 To Len(formula_string)
-        char = Mid(formula_string, i, 1)
-
-        If char = "(" Then
-            If current_str <> "" Then formula_stack.Add current_str
-            current_str = ""
-    
-        ElseIf char = ")" Then
-            ' after close parenthese ----------
-            calculated_value = ConvertPolynomialStringToVariant(current_str)
-            
-            If formula_stack.Count > 0 Then
-                current_str = formula_stack.Item(formula_stack.Count) & "(" & calculated_value & ")"
-                formula_stack.Remove formula_stack.Count
-            Else
-                current_str = ""
-            End If
-            ' -----------------------------
-        Else
-            current_str = current_str & char
-            
-        End If
-    Next i
-    ParseParentheses = current_str
-End Function
-
-
-
-' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1" -> 9
-Private Function ConvertPolynomialStringToVariant(formula_str As String) As Variant
-    Dim calculated_value, calculated_string
-    Dim monominal_string As String, buf_val, v, temp_polynominal_string As String, formula_str_re, fcol As New Collection
-    Dim polynominal_collection As Collection
-    
-    On Error GoTo errFor
-    Set polynominal_collection = SplitPolynomoinalStringByOperator(formula_str)
-    
-    Dim p
-    For Each p In polynominal_collection
-        If p(0) = False Then Call TryConvertMonomialToValue((p(1)), p(1))
-    Next
-    
-    Call EvaluatePolynominalCollection(polynominal_collection, reval)
-    
-'    calculated_value = RunEvaluate(calculated_string)
-    
-    If IsError(calculated_value) Then Err.Raise 9006, "Lambda.ConvertPolynomialStringToVariant()", "Unsupported lambda string. can not evaluate formula"
-    
-    ConvertPolynomialStringToVariant = calculated_value
-End Function
-
-
-
-' example) "x.abc" -> x.abc,  "x.abc.def" -> 3,   "x.abc + x.abc.def" -> x.abc + 3 (error)
-Private Function TryConvertPolynominalToValue(formula_str As String, ByRef return_value) As Boolean
-
-    If IsMonomical(formula_str) = False Then
-        ' has operator -> polynominal
-        return_value = ConvertPolynomialStringToVariant(formula_str)
-        TryConvertPolynominalToValue = False
-    Else
-        ' nothing operator ->  monominal
-        TryConvertPolynominalToValue = TryConvertMonomialToValue(formula_str, return_value)
-    End If
-    
-End Function
-
-' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1"
-Private Function ConvertToPolynomialWithoutObject(formula_str As String) As String
-    Dim monominal_string As String, buf_val, v, temp_polynominal_string As String, formula_str_re, fcol As New Collection
-    Dim polynominalColl As Collection
-    
-    On Error GoTo errFor
-    Set polynominalColl = SplitPolynomoinalStringByOperator(formula_str)
-    
-    Dim p
-    For Each p In polynominalColl
-        If p(0) = False Then Call TryConvertMonomialToValue((p(1)), p(1))
-    Next
-    
-    
-    ConvertToPolynomialWithoutObject = formula_str_re
-    Exit Function
-errFor:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ConvertToPolynomialWithoutObject()", Err.Description
-End Function
-
-Private Function SplitPolynomoinalStringByOperator(formula_str As String) As Collection
-    Dim monominal_string As String, ope As String, temp_polynominal_string As String, fcol As New Collection
-    
-    temp_polynominal_string = formula_str
-    Do While Len(temp_polynominal_string) > 1
-        
-        Call GetMonominalAnsOperatorStringFromPolynomial(temp_polynominal_string, monominal_string, ope)
-        
-        fcol.Add Array(False, monominal_string)
-        If ope <> "" Then fcol.Add Array(True, ope)
-    Loop
-    
-    Set SplitPolynomoinalStringByOperator = fcol
-End Function
-
-
-'1.2.1 extruct string to operator string. ex) "abc.def + 2" -> "abc.def "
-Private Function GetMonominalStringFromPolynomial(polynomial_string, ByRef next_polynominal As String) As String
-    Dim start_index, last_index, term_string As String
-    
-'    start_index = InStrVariable(polynomial_string)
-    start_index = 1
-    last_index = IIf(InStrOperator(polynomial_string, start_index) = 0, Len(polynomial_string), InStrOperator(polynomial_string, start_index) - 1)
-    term_string = Mid(polynomial_string, start_index, last_index - start_index + 1)
-    
-    GetMonominalStringFromPolynomial = term_string
-    next_polynominal = Mid(polynomial_string, InStrOperator(polynomial_string, start_index) + LenOperator(polynomial_string) + 1)
-End Function
-
-Private Function GetMonominalAnsOperatorStringFromPolynomial(ByRef polynomial_string, ByRef monominal_string As String, ByRef operator_string As String)
-    Dim start_index, last_index, right_string As String
-    
-    start_index = 1
-    last_index = IIf(InStrOperator(polynomial_string, start_index) = 0, Len(polynomial_string), InStrOperator(polynomial_string, start_index) - 1)
-    monominal_string = Mid(polynomial_string, start_index, last_index - start_index + 1)
-    
-    right_string = Mid(polynomial_string, last_index + 1)
-    operator_string = Mid(right_string, 1, LenOperator(right_string))
-    polynomial_string = Mid(right_string, Len(operator_string) + 1)
-End Function
-
-
-'1.2.2 example) "x.abc.def" -> 1 ,  "x" -> 1, "1" -> 1
-Private Function TryConvertMonomialToValue(monominal_string As String, ByRef return_value) As Boolean
-    Dim splited_by_dots() As String, splited_by_dot, i, eval_var, var_str As String, v, re As Variant
-    
-    monominal_string = Replace(monominal_string, " ", "")
-    If monominal_string = "" Then SetObjectAsBuffer re, return_value: Exit Function
-    
-On Error GoTo errFunction
-    If HasVariable(monominal_string) Then
-        For Each v In vars_
-            If HasChildString(monominal_string) Then
-                ' "x.abc.def" -> 1
-                splited_by_dots = Split(monominal_string, ".")
-                SetObjectAsBuffer v(0), return_value
-                For i = 1 To UBound(splited_by_dots)
-                    Call SetCallByNameValue(return_value, (splited_by_dots(i)), return_value)
-                Next
-            Else
-                ' "x" -> 1 , "x(1)" -> 1 , x() -> 1
-                Call ConvertFromVariableStringToValue(v(0), monominal_string, return_value)
-            End If
-        Next
-    Else
-        Call ConvertFromStringToValue(monominal_string, return_value)
-    End If
-    
-    AddTag return_value, return_value
-    If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
-    Exit Function
-errFunction:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryConvertMonomialToValue()", Err.Description
-End Function
-
-
-Private Function ConvertFromStringToValue(monominal_string As String, ByRef return_value)
-    If IsMethodPropOrArrayString(monominal_string) Then
-        Err.Raise 9004, "Lambda.ConvertFromStringToValue()", "Lambda string has error. unsupported string.: " & monominal_string
-    Else
-        SetObjectAsBuffer monominal_string, return_value
-    End If
-End Function
-
-Private Function ConvertFromVariableStringToValue(var0, monominal_string As String, ByRef return_value)
-    Dim val
-    If IsMethodPropOrArrayString(monominal_string) And IsArray(var0) Then
-        ' "x(1)" -> 1
-        Call TryGetArrayValue(var0, GetParametersByString(monominal_string), return_value)
-        
-    ElseIf IsMethodPropOrArrayString(monominal_string) And IsArray(var0) = False Then
-        ' todo write more details
-        Err.Raise 9004, "Lambda.ConvertFromVariableStringToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
-    Else
-        ' x, 123
-        SetObjectAsBuffer var0, return_value
-    End If
-
-'    SetObjectAsBuffer val, return_value
-End Function
-
-Private Function SetCallByNameValue(called_object, called_proc As String, ByRef return_value) As Boolean
-    Dim re, args As Variant, called_proc_name As String
-        
-    args = GetParametersByString(ExtructProcParamString(called_proc))
-    called_proc_name = GetProcName(called_proc)
-    
-    If HasArgumentString(called_proc) Then
-        ' property or method  retured value is array
-        On Error GoTo errGetWitArg
-        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet, args), return_value)
-        SetCallByNameValue = IsObject(return_value)
-        Exit Function
-errGetWitArg:
-        If Err.Number = 451 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), re)
-            If VarType(re) > vbArray Then
-                SetCallByNameValue = TryGetArrayValueByParamstersString(re, args, return_value)
-            Else
-                Err.Raise Err.Number, Err.Source & "at Lambda.SetCallByNameValue(): Get method with arguments, not array ", Err.Description
-            End If
-        ElseIf Err.Number = 450 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod, args), return_value)
-            SetCallByNameValue = IsObject(return_value)
-        ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
-        Else
-            Err.Raise Err.Number, Err.Source, Err.Description
-        End If
-    
-    Else
-        ' property or method
-        On Error GoTo errGetWithoutArg
-        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), return_value)
-        SetCallByNameValue = IsObject(return_value)
-        Exit Function
-errGetWithoutArg:
-        If Err.Number = 450 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod), return_value)
-            SetCallByNameValue = IsObject(return_value)
-        ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
-        Else
-            Err.Raise Err.Number, Err.Source, Err.Description
-        End If
-    End If
-    
-End Function
-
-
-' "1 + 2 * 2"  -> 1 + 4 -> 5 (calculate each operators.(recursively called by self))
-Private Function RunEvaluate(string_has_operator)
-    Dim i As Long, o, vl, vr
-
-On Error GoTo errCalculate
-    
-    For Each o In Operators
-    
-        i = InStrOperatorBy(string_has_operator, 1, o)
-        If i < 1 Then GoTo nextloop
-        
-        ' found matched operator
-        vl = RunEvaluate(Left(string_has_operator, i - 1))
-        vr = RunEvaluate(Mid(string_has_operator, i + Len(o)))
-        RunEvaluate = CalculateOperator(operator_string:=o, left_value:=Trim(vl), right_value:=Trim(vr))
-        Exit Function
-nextloop:
-    Next
-    
-    ' not found matched operator
-    RunEvaluate = string_has_operator
-    Exit Function
-    
-errCalculate:
-    Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.RunEvaluate(" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
-End Function
-
 ' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value, removed_tag_left, removed_tag_right
@@ -920,23 +509,6 @@ On Error GoTo errCalc
 errCalc:
     Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
 End Function
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
