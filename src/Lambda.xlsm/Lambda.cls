@@ -17,7 +17,6 @@ Option Explicit
 ' try to simply calculate by not using Evaluate().
 
 ' unsupported
-'  - multi arguments
 '  - multi lines
 ' ----------------------------------------------------
 
@@ -60,9 +59,8 @@ End Function
 Public Function Evaluate()
     Dim evaluated_value, polynominal_collection As Collection
 
-On Error GoTo errEvaluate
-    Call SetObjectAsBuffer(ParsePolynominal(lambdaString_), evaluated_value)
-    Call RemoveTags(evaluated_value, Evaluate)
+'On Error GoTo errEvaluate
+    Call SetObjectAsBuffer(ParsePolynominal(lambdaString_), Evaluate)
     Exit Function
     
 errEvaluate:
@@ -75,6 +73,7 @@ End Function
 Private Function ParsePolynominal(polynominal_string As String) As Variant
     Dim polynominal_collection As Collection, polynominal_collection_re As New Collection, p
     
+'On Error GoTo errLabel
     Set polynominal_collection = SplitPolynominal(polynominal_string)
     
     For Each p In polynominal_collection
@@ -88,6 +87,10 @@ Private Function ParsePolynominal(polynominal_string As String) As Variant
     Next
     
     Call EvaluetePolynominalCollection(polynominal_collection_re, ParsePolynominal)
+    Exit Function
+
+errLabel:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ParsePolynominal(" & polynominal_string & ")", Err.Description
 End Function
 
 Private Function ConvertMonominalStringToValue2(monominal_string As String) As Variant
@@ -147,7 +150,6 @@ Private Function EvaluateMonominalObject(formula_string As String, inner_collect
         Call SetObjectAsBuffer(GetChildVar(formula_string, inner_collection, parent_object), tmp)
     End If
 
-    Call AddTag(tmp, tmp)
     Call SetObjectAsBuffer(tmp, EvaluateMonominalObject)
 
 'errFunction:
@@ -156,6 +158,7 @@ End Function
 
 Private Function GetChildVar(formula_string As String, inner_collection As Collection, parent_object)
     Dim arguments, err_num, err_des, tmp
+    
     If inner_collection.Count > 0 Then
     On Error Resume Next
         Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), tmp)
@@ -189,14 +192,17 @@ End Function
 
 Private Function GetVarByVarName(formula_string)
     Dim v
+    
     For Each v In vars_
         If formula_string = v(lmVarTypeName) Then Call SetObjectAsBuffer(v(lmVarTypeVar), GetVarByVarName): Exit Function
     Next
     Call Err.Raise(11000, "GetVarByVarName()", "not found variable")
+    
 End Function
 
 Private Function RunMethod(method_name As String, ic As Collection)
     Dim tmp
+    
     Select Case ic.Count
     Case 0:   Call SetObjectAsBuffer(Application.Run(method_name), tmp)
     Case 1:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1)), tmp)
@@ -214,6 +220,7 @@ End Function
 
 Private Function GetArrayWithArgument(arr, ic As Collection)
     Dim tmp
+    
     Select Case ic.Count
     Case 1:   Call SetObjectAsBuffer(arr(ic(1)), tmp)
     Case 2:   Call SetObjectAsBuffer(arr(ic(1), ic(2)), tmp)
@@ -241,7 +248,7 @@ Private Function SplitMonominalStringByDot(ByVal monominal_strring) As Collectio
         Case ")":             Let cntPar = cntPar - 1
         End Select
         
-        Let left_string = left_string & Left(right_string, 1)
+        Let left_string = left_string & Left(right_string, i)
         Let right_string = Mid(right_string, i + 1)
         If cntPar = 0 And IsStartWithDot(right_string) Then
             Call monominal_collection.Add(left_string)
@@ -255,7 +262,9 @@ Private Function SplitMonominalStringByDot(ByVal monominal_strring) As Collectio
 End Function
 
 Private Function IsStartWithDot(str) As Boolean
+
     If Left(str, 1) = "." Then IsStartWithDot = True Else IsStartWithDot = False
+    
 End Function
 
 Private Function SplitPolynominal(ByVal polynoimnal_string As String) As Collection
@@ -267,7 +276,7 @@ Private Function SplitPolynominal(ByVal polynoimnal_string As String) As Collect
         Select Case SplitPolynoinalString(right_string, left_string, right_string, ope)
         Case lmOpe:        Call polynoimal_collection.Add(Array(lmOpe, ope))
         Case lmMono:     Call polynoimal_collection.Add(Array(lmMono, left_string))
-        Case lmPoly:        Call polynoimal_collection.Add(Array(lmPoly, Mid(left_string, 2, Len(left_string) - 2)))
+        Case lmPoly:        Call polynoimal_collection.Add(Array(lmPoly, GetInnerStringsClosedBy(left_string, "(")))
         End Select
     Loop
     Set SplitPolynominal = polynoimal_collection
@@ -276,7 +285,11 @@ End Function
 
 Private Function SplitPolynoinalString(str As String, left_string As String, right_string As String, ope As String) As lmPolynominalParseCase
     
-    If IsOperator(str) Then
+    If IsStartedWithTags(str) Then
+        Let SplitPolynoinalString = lmMono
+        Call SplitFirstOperator(str, left_string, right_string)
+        Let ope = ""
+    ElseIf IsOperator(str) Then
         Call SplitByOperator(str, ope, right_string)
         Let left_string = ""
         Let SplitPolynoinalString = lmOpe
@@ -363,7 +376,9 @@ Private Function EvaluetePolynominalCollection(pc As Collection, reval)
     If pc.Count = 0 Then
         Exit Function
     ElseIf pc.Count = 1 Then
-        SetObjectAsBuffer pc(1)(1), reval: Exit Function
+        SetObjectAsBuffer pc(1)(1), reval
+        Call RemoveTags(reval, reval)
+        Exit Function
     Else
         reval = RunEvaluatePolynominalCollectionRec(pc)
     End If
@@ -422,19 +437,21 @@ End Function
 Private Function GetVars(eval_vars, var_strings) As Collection
     Dim i As Long, col As New Collection
     
+    var_strings = Split(var_strings, ",")
+    
     If IsArray(eval_vars) = False Then
-        col.Add Array(eval_vars, var_strings)
-    Else
-        var_strings = Split(var_strings, ",")
-        If ArrayCount(var_strings) = 1 Then
-            col.Add Array(eval_vars, var_strings(LBound(var_strings)))
-        Else
-            For i = LBound(eval_vars) To UBound(eval_vars)
-                col.Add Array(eval_vars(i), var_strings(i))
-            Next i
-        End If
+        col.Add Array(eval_vars, var_strings(LBound(var_strings)))
+    
+    ElseIf IsArray(eval_vars) And ArrayCount(var_strings) = 1 Then
+        col.Add Array(eval_vars, var_strings(LBound(var_strings)))
+    
+    ElseIf IsArray(eval_vars) And ArrayCount(var_strings) > 1 Then
+        For i = LBound(eval_vars) To UBound(eval_vars)
+            col.Add Array(eval_vars(i), var_strings(i))
+        Next i
     End If
     Set GetVars = col
+    
 End Function
 
 Private Function GetEvalVars(var)
@@ -466,6 +483,7 @@ Private Function GetFormulaString(lambda_string As String) As String
     
     formula_string = Mid(lambda_string, InStr(lambda_string, "=>") + 2)
     If Len(formula_string) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
+    formula_string = AddTags(formula_string)
     
     GetFormulaString = formula_string
 End Function
@@ -503,8 +521,7 @@ On Error GoTo errCalc
     End Select
     
     Dim calculated_value_with_tag
-    AddTag calculated_value, calculated_value_with_tag
-    CalculateOperator = calculated_value_with_tag
+    CalculateOperator = calculated_value
     Exit Function
 errCalc:
     Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
@@ -526,37 +543,37 @@ Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value) A
 
 End Function
 
-Private Function HasOperator(string_has_operator As String) As Boolean
-    
-    HasOperator = InStrOperator(string_has_operator, 1) > 0
+'Private Function HasOperator(string_has_operator As String) As Boolean
+'
+'    HasOperator = InStrOperator(string_has_operator, 1) > 0
+'
+'End Function
 
-End Function
+'Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
+'    Dim i As Long, str As String
+'
+'    str = Mid(string_has_operator, start_index)
+'    For i = start_index To Len(string_has_operator)
+'        i = i + GetTagSpanLengthWithStarted(str)
+'        str = Mid(string_has_operator, i)
+'        If Left(str, Len(o)) = o Then InStrOperatorBy = i: Exit Function
+'    Next i
+'    InStrOperatorBy = 0
+'
+'End Function
 
-Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
-    Dim i As Long, str As String
-    
-    str = Mid(string_has_operator, start_index)
-    For i = start_index To Len(string_has_operator)
-        i = i + GetTagSpanLengthWithStarted(str)
-        str = Mid(string_has_operator, i)
-        If Left(str, Len(o)) = o Then InStrOperatorBy = i: Exit Function
-    Next i
-    InStrOperatorBy = 0
-    
-End Function
-
-Private Function InStrOperator(string_has_operator, start_index) As Long
-    Dim i As Long, str As String
-    
-    str = Mid(string_has_operator, start_index)
-    For i = start_index To Len(string_has_operator)
-        i = i + GetTagSpanLengthWithStarted(str)
-        str = Mid(string_has_operator, i)
-        If IsOperator(str) Then InStrOperator = i: Exit Function
-    Next i
-    InStrOperator = 0
-    
-End Function
+'Private Function InStrOperator(string_has_operator, start_index) As Long
+'    Dim i As Long, str As String
+'
+'    str = Mid(string_has_operator, start_index)
+'    For i = start_index To Len(string_has_operator)
+'        i = i + GetTagSpanLengthWithStarted(str)
+'        str = Mid(string_has_operator, i)
+'        If IsOperator(str) Then InStrOperator = i: Exit Function
+'    Next i
+'    InStrOperator = 0
+'
+'End Function
 
 Private Function IsOperator(operator_string) As Boolean
     Dim o
@@ -569,14 +586,14 @@ Private Function IsOperator(operator_string) As Boolean
     
 End Function
 
-Private Function LenOperator(operator_string) As Long
-    Dim o
-    
-    For Each o In Operators
-        If Left(operator_string, Len(o)) = o Then LenOperator = Len(o): Exit Function
-    Next
-    
-End Function
+'Private Function LenOperator(operator_string) As Long
+'    Dim o
+'
+'    For Each o In Operators
+'        If Left(operator_string, Len(o)) = o Then LenOperator = Len(o): Exit Function
+'    Next
+'
+'End Function
 Private Function TakeOperator(operator_string) As String
     Dim o
     
@@ -592,39 +609,72 @@ Private Property Get Operators()
                       "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
 End Property
 
-
-Private Function AddTag(unverfied_value, re_value)
-
-    If IsObject(unverfied_value) Then
-        Set re_value = unverfied_value
-    ElseIf IsDate(unverfied_value) Then
-        re_value = AddTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE)
-    ElseIf VarType(unverfied_value) = vbBoolean Then
-        re_value = unverfied_value
-    ElseIf IsNumeric(unverfied_value) Then
-        re_value = val(unverfied_value)
-    ElseIf VarType(unverfied_value) = vbString Then
-        re_value = AddTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
-    Else
-        re_value = unverfied_value
-    End If
+Private Function AddTags(formula_string As String) As String
+    Dim str As String
+    
+    str = formula_string
+    str = AddTag(str, "#")
+    str = AddTag(str, """")
+    AddTags = str
 
 End Function
+
+Private Function AddTag(formula_string As String, by_tag_key As String) As String
+    Dim l  As String, r As String, p As String, stck As New Collection, is_open As Boolean, ln As Long
+    
+    ln = Len(by_tag_key)
+    r = formula_string
+    Do While r <> ""
+        Select Case Mid(r, 1, ln)
+        Case by_tag_key
+            If is_open Then
+                If by_tag_key = """" Then l = AddTagAs(l, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+                If by_tag_key = "#" Then l = AddTagAs(l, TAG_DATE_OPEN, TAG_DATE_CLOSE)
+                Call PopStack(stck, p)
+                l = p & l
+                r = Mid(r, ln + 1)
+                is_open = False
+            Else
+                Call PushStack(stck, l)
+                l = ""
+                r = Mid(r, ln + 1)
+                is_open = True
+            End If
+        End Select
+        l = l & Mid(r, ln, 1)
+        r = Mid(r, ln + 1)
+    Loop
+    Let AddTag = l
+
+End Function
+
+
+Private Function IsBoolean(ByVal str) As Boolean
+    
+    str = Trim(LCase(str))
+    If str = "true" Or str = "false" Then IsBoolean = True Else IsBoolean = False
+    
+End Function
+
 
 Private Function RemoveTags(unverfied_value, re_value)
     
     If IsObject(unverfied_value) Then
         Set re_value = unverfied_value
+    ElseIf IsArray(unverfied_value) Then
+        Let re_value = unverfied_value
     ElseIf VarType(unverfied_value) = vbBoolean Then
         re_value = unverfied_value
+    ElseIf IsBoolean(unverfied_value) Then
+        re_value = CBool(unverfied_value)
+    ElseIf HasTagBy(unverfied_value, TAG_DATE_OPEN) Then
+        re_value = DateValue(RemoveTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE))
+    ElseIf HasTagBy(unverfied_value, TAG_STRING_OPEN) Then
+        re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
     ElseIf IsNumeric(unverfied_value) Then
         re_value = val(unverfied_value)
-    ElseIf VarType(unverfied_value) = vbString Then
-        If HasTagBy(unverfied_value, TAG_DATE_OPEN) Then re_value = DateValue(RemoveTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE))
-        If HasTagBy(unverfied_value, TAG_STRING_OPEN) Then re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
     Else
         re_value = unverfied_value
-'        Debug.Print "(RemoveTags()) unexpected value:" & unverfied_value
     End If
 
 End Function
@@ -649,7 +699,7 @@ End Function
 
 Private Function GetTagSpanLengthWithStarted(str) As Long
     
-    If HasStartedWithTags(str) = False Then
+    If IsStartedWithTags(str) = False Then
         GetTagSpanLengthWithStarted = 0
     Else
         GetTagSpanLengthWithStarted = InStr(str, "/>") + Len("/>") - 1
@@ -657,68 +707,16 @@ Private Function GetTagSpanLengthWithStarted(str) As Long
 
 End Function
 
-Private Function HasStartedWithTags(str) As Boolean
+Private Function IsStartedWithTags(str) As Boolean
     
-    HasStartedWithTags = False
-    If Left(str, Len(TAG_STRING_OPEN)) = TAG_STRING_OPEN Then HasStartedWithTags = True
-    If Left(str, Len(TAG_DATE_OPEN)) = TAG_DATE_OPEN Then HasStartedWithTags = True
+    IsStartedWithTags = False
+    If Left(str, Len(TAG_STRING_OPEN)) = TAG_STRING_OPEN Then IsStartedWithTags = True
+    If Left(str, Len(TAG_DATE_OPEN)) = TAG_DATE_OPEN Then IsStartedWithTags = True
         
 End Function
 
 
 ' related arrays -------------------------------
-Private Function TryGetArrayValueByString(arr, array_sting, reval) As Boolean
-    Dim pstr As String, parr
-    
-    If HasArgumentString(array_sting) Then
-        pstr = ExtructArrayParametersString(array_sting)
-        TryGetArrayValueByString = TryGetArrayValueByParamstersString(arr, pstr, reval)
-    Else
-        reval = arr
-        TryGetArrayValueByString = True
-    End If
-
-End Function
-Private Function TryGetArrayValueByParamstersString(arr, parameter_sting, reval) As Boolean
-        Dim pstr As String, parr
-        
-        parr = GetParametersByString(parameter_sting)
-        TryGetArrayValueByParamstersString = TryGetArrayValue(arr, parr, reval)
-
-End Function
-
-Private Function ExtructArrayParametersString(array_sting, Optional obj_name As String = "") As String
-    
-    If InStr(array_sting, "(") > 0 Then
-        ExtructArrayParametersString = Mid(array_sting, Len(obj_name) + 1)
-    Else
-        ExtructArrayParametersString = ""
-    End If
-
-End Function
-Private Function GetParametersByString(parameters_sting)
-    
-    GetParametersByString = Split(parameters_sting, ",")
-    If UBound(GetParametersByString) = 0 Then GetParametersByString = parameters_sting
-
-End Function
-Private Function TryGetArrayValue(arr, p, reval) As Boolean
-    Dim rnk As Long: rnk = UBound(p) - LBound(p) + 1
-    
-On Error GoTo errArray
-    Select Case rnk
-        Case 1: TryGetArrayValue = SetObjectAsBuffer(arr(p(0)), reval)
-        Case 2: TryGetArrayValue = SetObjectAsBuffer(arr(p(0), p(1)), reval)
-        Case 3: TryGetArrayValue = SetObjectAsBuffer(arr(p(0), p(1), p(2)), reval)
-        Case Else
-            Err.Raise 9009, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", "unsupported dimension array"
-    End Select
-    Exit Function
-
-errArray:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", Err.Description
-End Function
-
 Private Function ArrayCount(arr, Optional d As Long = 1) As Long
     
     ArrayCount = UBound(arr, d) - LBound(arr, d) + 1
@@ -727,25 +725,9 @@ End Function
 
 Private Function IsMethodPropOrArrayString(monomical_string) As Boolean
     
-    IsMethodPropOrArrayString = InStr(monomical_string, "(") > 0
-
-End Function
-
-
-Private Function GetProcName(function_string) As String
-    Dim index_parenthes_open
+    IsMethodPropOrArrayString = InStr(monomical_string, "Call ") > 0
+    If IsMethodPropOrArrayString Then monomical_string = Replace(monomical_string, "Call ", "")
     
-    index_parenthes_open = InStr(function_string, "(")
-    If index_parenthes_open > 0 Then GetProcName = Left(function_string, index_parenthes_open - 1) Else GetProcName = function_string
-
-End Function
-
-Private Function HasArgumentString(monominal_string) As Boolean
-    Dim index_parenthes_open
-    
-    index_parenthes_open = InStr(monominal_string, "(")
-    HasArgumentString = index_parenthes_open > 0
-
 End Function
 
 Private Function ExtructProcNameParamString(function_string, ByRef proc_name, ByRef param_string)
@@ -781,41 +763,6 @@ Private Function HasVariable(formula_string As String) As Boolean
 
 End Function
 
-Private Function IsVariableString(formula_string As String) As Boolean
-    Dim v, f As Boolean
-    
-    For Each v In vars_
-       If formula_string = v(1) Then IsVariableString = True: Exit Function
-    Next
-
-End Function
-
-Private Function HasVariableBy(formula_string As String, var_string As String) As Boolean
-    
-    HasVariableBy = InStr(formula_string, var_string) > 0
-
-End Function
-
-Private Function InStrVariable(formula_string) As Long
-    Dim i As Long, j As Long, str As String
-    
-    For j = 1 To Len(formula_string)
-        str = Mid(formula_string, j)
-        For i = 1 To Len(formula_string)
-            i = i + GetTagSpanLengthWithStarted(str)
-            If IsVariableString(Mid(formula_string, j, i)) Then InStrVariable = j: Exit Function
-        Next i
-    Next j
-    InStrVariable = 0
-
-End Function
-
-Private Function HasChildString(monomical_string) As Boolean
-    
-    HasChildString = (ArrayCount(Split(monomical_string, ".")) <> 1)
-
-End Function
-
 Private Function CollectionToArray(col As Collection)
     Dim arr, i
     
@@ -831,3 +778,25 @@ Private Function CollectionToArray(col As Collection)
     Let CollectionToArray = arr
 End Function
 
+Private Function GetInnerStringsClosedBy(str As String, closed_by As String) As String
+    Dim l As Long
+    
+    Let l = Len(closed_by) + 1
+    Let GetInnerStringsClosedBy = Mid(str, l, Len(str) - l)
+    
+End Function
+
+Private Function PushStack(pushed_stack As Collection, var As Variant)
+
+    pushed_stack.Add var
+
+End Function
+
+Private Function PopStack(poped_stack As Collection, var As Variant)
+
+    If poped_stack.Count > 0 Then
+        SetObjectAsBuffer poped_stack(poped_stack.Count), var
+        poped_stack.Remove poped_stack.Count
+    End If
+
+End Function
