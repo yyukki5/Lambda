@@ -57,182 +57,184 @@ Attribute Initialize.VB_UserMemId = 0
 End Function
 
 Public Function Evaluate()
-    Dim evaluated_value, polynominal_collection As Collection
 
-'On Error GoTo errEvaluate
-    Call SetObjectAsBuffer(ParsePolynominal(lambdaString_), Evaluate)
+On Error GoTo errLabel
+    Call ParsePolynominal(lambdaString_, Evaluate)
     Exit Function
     
-errEvaluate:
+errLabel:
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
 End Function
 
 
 
 'Private ---------------------------------------------
-Private Function ParsePolynominal(polynominal_string As String) As Variant
+Private Function ParsePolynominal(polynominal_string As String, reval) As Variant
     Dim polynominal_collection As Collection, polynominal_collection_re As New Collection, p
     
-'On Error GoTo errLabel
+On Error GoTo errLabel
     Set polynominal_collection = SplitPolynominal(polynominal_string)
     
     For Each p In polynominal_collection
         Select Case p(lmIsOpe)
         Case lmPoly
-            Call SetObjectAsBuffer(ParsePolynominal((p(lmValue))), p(lmValue))
+            Call ParsePolynominal((p(lmValue)), p(lmValue))
         Case lmMono
-            Call SetObjectAsBuffer(ConvertMonominalStringToValue2((p(lmValue))), p(lmValue))
+            Call ConvertMonominalStringToValue((p(lmValue)), p(lmValue))
         End Select
         Call polynominal_collection_re.Add(p)
     Next
     
-    Call EvaluetePolynominalCollection(polynominal_collection_re, ParsePolynominal)
+    Call EvaluetePolynominalCollection(polynominal_collection_re, reval)
     Exit Function
 
 errLabel:
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ParsePolynominal(" & polynominal_string & ")", Err.Description
 End Function
 
-Private Function ConvertMonominalStringToValue2(monominal_string As String) As Variant
+
+Private Function ConvertMonominalStringToValue(monominal_string As String, reval) As Variant
     Dim monominal_collection As Collection, tmp, m, p
     
     Set monominal_collection = SplitMonominalStringByDot(monominal_string)
     For Each m In monominal_collection
         Call SetObjectAsBuffer(ConvertMonominalObjectToValue(m, p), p)
     Next
-    Call SetObjectAsBuffer(p, ConvertMonominalStringToValue2)
+    Call SetObjectAsBuffer(p, reval)
     
 End Function
 
 Private Function ConvertMonominalObjectToValue(object_string, parent_object) As Variant
-    Dim formula_string As String, inner_string As String, inner_collection As Collection, inner_collection_re As New Collection, ic
+    Dim formula_string As String, inner_string As String, inner_collection As Collection, inner_collection_re As New Collection, ic, tmp
     
     Call ExtructProcNameParamString(object_string, formula_string, inner_string)
     Set inner_collection = SplitByComma(inner_string)
     
     For Each ic In inner_collection
-          Call inner_collection_re.Add(ParsePolynominal((ic)))
+        Call ParsePolynominal((ic), tmp)
+        Call inner_collection_re.Add(tmp)
     Next ic
     Set inner_collection = inner_collection_re
     
-    Call SetObjectAsBuffer(EvaluateMonominalObject(formula_string, inner_collection, parent_object), _
-        ConvertMonominalObjectToValue)
+    Call EvaluateMonominalObject(formula_string, inner_collection, parent_object, ConvertMonominalObjectToValue)
 
 End Function
 
-Private Function IsNullOrNothing(unverified_value) As Boolean
-    
-    If IsObject(unverified_value) Then
-        Let IsNullOrNothing = (unverified_value Is Nothing)
-    Else
-        Let IsNullOrNothing = (IsNull(unverified_value) Or IsEmpty(unverified_value))
-    End If
+Private Function EvaluateMonominalObject(formula_string As String, inner_collection As Collection, parent_object, ByRef reval) As Variant
 
-End Function
-
-Private Function EvaluateMonominalObject(formula_string As String, inner_collection As Collection, parent_object) As Variant
-    Dim v, tmp
-    
+On Error GoTo errLabel
     formula_string = Trim(formula_string)
-    If IsNullOrNothing(parent_object) Then
+    
+    If IsNullOrEmptyOrNothing(parent_object) Then
+    
         If HasVariable(formula_string) Then
-            Call SetObjectAsBuffer(GetVarByVarName(formula_string), tmp)
-            If IsArray(tmp) And inner_collection.Count > 0 Then _
-                Call SetObjectAsBuffer(GetArrayWithArgument(tmp, inner_collection), tmp)
+            Call GetVarByVarName(formula_string, reval)
+            
+            If IsArray(reval) And inner_collection.Count > 0 Then
+                Dim tmp_arr
+                tmp_arr = reval: reval = Null
+                Call GetArrayElement(tmp_arr, inner_collection, reval)
+            End If
+        
         Else
             If IsMethodPropOrArrayString(formula_string) Then
-                Call SetObjectAsBuffer(RunMethod(formula_string, inner_collection), tmp)
+                Call RunMethod(formula_string, inner_collection, reval)
             Else
-                tmp = formula_string
+                reval = formula_string
             End If
         End If
+    
     Else
-        Call SetObjectAsBuffer(GetChildVar(formula_string, inner_collection, parent_object), tmp)
+        Call GetChildVar(formula_string, inner_collection, parent_object, reval)
     End If
-
-    Call SetObjectAsBuffer(tmp, EvaluateMonominalObject)
-
-'errFunction:
-'    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryConvertMonomialToValue()", Err.Description
+    Exit Function
+    
+errLabel:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.EvaluateMonominalObject()", Err.Description
 End Function
 
-Private Function GetChildVar(formula_string As String, inner_collection As Collection, parent_object)
-    Dim arguments, err_num, err_des, tmp
+Private Function GetChildVar(formula_string As String, inner_collection As Collection, parent_object, reval)
+    Dim arguments, err_num As Long, err_des, tmp
     
     If inner_collection.Count > 0 Then
-    On Error Resume Next
-        Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), tmp)
+        
+        On Error Resume Next
+        Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), reval)
         Err.Clear
-        If IsArray(tmp) Then
-            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), tmp)
-            Call SetObjectAsBuffer(GetArrayWithArgument(tmp, inner_collection), tmp)
-        Else
+        
+        If IsArray(reval) Then
+            Dim tmp_arr
+            tmp_arr = reval: reval = Null
+            Call GetArrayElement(tmp_arr, inner_collection, reval)
+        ElseIf IsEmpty(reval) Then
             arguments = CollectionToArray(inner_collection)
-            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet, arguments), tmp)
+            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet, arguments), reval)
             If Err.Number = 450 Then
                 Err.Clear
-                Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbMethod, arguments), tmp)
+                Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbMethod, arguments), reval)
             End If
             If Err.Number <> 0 Then err_num = Err.Number: err_des = Err.Description
-            On Error GoTo 0:    If err_num <> 0 Then Call Err.Raise(err_num, "GetChildVar()", err_des)
+            On Error GoTo 0:    If err_num <> 0 Then Call Err.Raise(err_num, "Lambda.GetChildVar()", err_des)
+        Else
+            On Error GoTo 0:    Call Err.Raise(11000, "Lambda.GetChildVar()", "undefined error")
         End If
     Else
-    On Error Resume Next
-        Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), tmp)
+    
+        On Error Resume Next
+        Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), reval)
         If Err.Number = 450 Then
             Err.Clear
-            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbMethod), tmp)
+            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbMethod), reval)
         End If
         If Err.Number <> 0 Then err_num = Err.Number: err_des = Err.Description
         On Error GoTo 0:   If err_num <> 0 Then Call Err.Raise(err_num, "GetChildVar()", err_des)
     End If
     
-    Call SetObjectAsBuffer(tmp, GetChildVar)
+    
 End Function
 
-Private Function GetVarByVarName(formula_string)
+Private Function GetVarByVarName(formula_string, reval)
     Dim v
     
     For Each v In vars_
-        If formula_string = v(lmVarTypeName) Then Call SetObjectAsBuffer(v(lmVarTypeVar), GetVarByVarName): Exit Function
+        If formula_string = v(lmVarTypeName) Then
+            Call SetObjectAsBuffer(v(lmVarTypeVar), reval)
+            Exit Function
+        End If
     Next
-    Call Err.Raise(11000, "GetVarByVarName()", "not found variable")
+    Call Err.Raise(11000, "Lambda.GetVarByVarName()", "not found variable")
     
 End Function
 
-Private Function RunMethod(method_name As String, ic As Collection)
-    Dim tmp
+Private Function RunMethod(method_name As String, ic As Collection, reval)
     
     Select Case ic.Count
-    Case 0:   Call SetObjectAsBuffer(Application.Run(method_name), tmp)
-    Case 1:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1)), tmp)
-    Case 2:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2)), tmp)
-    Case 3:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3)), tmp)
-    Case 4:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4)), tmp)
-    Case 5:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5)), tmp)
-    Case 6:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), tmp)
+    Case 0:   Call SetObjectAsBuffer(Application.Run(method_name), reval)
+    Case 1:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1)), reval)
+    Case 2:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2)), reval)
+    Case 3:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3)), reval)
+    Case 4:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4)), reval)
+    Case 5:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5)), reval)
+    Case 6:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), reval)
     Case Else
-        Err.Raise 11000, "RunMethod"
+        Call Err.Raise(11000, "Lambda.RunMethod()", "arguments is over")
     End Select
     
-    Call SetObjectAsBuffer(tmp, RunMethod)
 End Function
 
-Private Function GetArrayWithArgument(arr, ic As Collection)
-    Dim tmp
-    
+Private Function GetArrayElement(arr, ic As Collection, reval)
+        
     Select Case ic.Count
-    Case 1:   Call SetObjectAsBuffer(arr(ic(1)), tmp)
-    Case 2:   Call SetObjectAsBuffer(arr(ic(1), ic(2)), tmp)
-    Case 3:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3)), tmp)
-    Case 4:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4)), tmp)
-    Case 5:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5)), tmp)
-    Case 6:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), tmp)
+    Case 1:   Call SetObjectAsBuffer(arr(ic(1)), reval)
+    Case 2:   Call SetObjectAsBuffer(arr(ic(1), ic(2)), reval)
+    Case 3:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3)), reval)
+    Case 4:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4)), reval)
+    Case 5:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5)), reval)
+    Case 6:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), reval)
     Case Else
-        Err.Raise 11000, "RunMethod"
+        Call Err.Raise(11000, "Lambda.GetArrayElement()", "arguments is over")
     End Select
     
-    Call SetObjectAsBuffer(tmp, GetArrayWithArgument)
 End Function
 
 Private Function SplitMonominalStringByDot(ByVal monominal_strring) As Collection
@@ -418,7 +420,7 @@ Private Function SplitCollectionByOpartor(pc As Collection, ope, left_col As Col
     Dim c, f As Boolean, left_c As New Collection, right_c As New Collection
     f = False
     For Each c In pc
-        If c(lmIsOpe) = lmOpe And c(lmValue) = ope And f = False Then f = True: GoTo nextloop
+        If c(lmIsOpe) = lmOpe Then If c(lmValue) = ope And f = False Then f = True: GoTo nextloop
         If f = False Then left_c.Add c Else right_c.Add c
 nextloop:
     Next
@@ -533,6 +535,7 @@ End Function
 
 Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value) As Boolean
     
+On Error GoTo errLabel
     If IsObject(unverified_value) Then
         Set buffer_value = unverified_value
         SetObjectAsBuffer = True
@@ -540,40 +543,11 @@ Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value) A
         buffer_value = unverified_value
         SetObjectAsBuffer = False
     End If
-
+    Exit Function
+    
+errLabel:
+    Err.Raise 10001, Err.Source & vbCrLf & "at Lambda.SetObjectAsBuffer()", Err.Description
 End Function
-
-'Private Function HasOperator(string_has_operator As String) As Boolean
-'
-'    HasOperator = InStrOperator(string_has_operator, 1) > 0
-'
-'End Function
-
-'Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
-'    Dim i As Long, str As String
-'
-'    str = Mid(string_has_operator, start_index)
-'    For i = start_index To Len(string_has_operator)
-'        i = i + GetTagSpanLengthWithStarted(str)
-'        str = Mid(string_has_operator, i)
-'        If Left(str, Len(o)) = o Then InStrOperatorBy = i: Exit Function
-'    Next i
-'    InStrOperatorBy = 0
-'
-'End Function
-
-'Private Function InStrOperator(string_has_operator, start_index) As Long
-'    Dim i As Long, str As String
-'
-'    str = Mid(string_has_operator, start_index)
-'    For i = start_index To Len(string_has_operator)
-'        i = i + GetTagSpanLengthWithStarted(str)
-'        str = Mid(string_has_operator, i)
-'        If IsOperator(str) Then InStrOperator = i: Exit Function
-'    Next i
-'    InStrOperator = 0
-'
-'End Function
 
 Private Function IsOperator(operator_string) As Boolean
     Dim o
@@ -586,14 +560,6 @@ Private Function IsOperator(operator_string) As Boolean
     
 End Function
 
-'Private Function LenOperator(operator_string) As Long
-'    Dim o
-'
-'    For Each o In Operators
-'        If Left(operator_string, Len(o)) = o Then LenOperator = Len(o): Exit Function
-'    Next
-'
-'End Function
 Private Function TakeOperator(operator_string) As String
     Dim o
     
@@ -800,3 +766,14 @@ Private Function PopStack(poped_stack As Collection, var As Variant)
     End If
 
 End Function
+
+Private Function IsNullOrEmptyOrNothing(unverified_value) As Boolean
+    
+    If IsObject(unverified_value) Then
+        Let IsNullOrEmptyOrNothing = (unverified_value Is Nothing)
+    Else
+        Let IsNullOrEmptyOrNothing = (IsNull(unverified_value) Or IsEmpty(unverified_value))
+    End If
+
+End Function
+
