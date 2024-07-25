@@ -126,25 +126,35 @@ On Error GoTo errLabel
     formula_string = Trim(formula_string)
     
     If IsNullOrEmptyOrNothing(parent_object) Then
+        ' ****, ****(-), x
     
-        If HasVariable(formula_string) Then
+        If HasVariableIn(formula_string) Then
+            ' x, x(-)
             Call GetVarByVarName(formula_string, reval)
             
             If IsArray(reval) And inner_collection.Count > 0 Then
+                ' x(-)
                 Dim tmp_arr
                 tmp_arr = reval: reval = Null
                 Call GetArrayElement(tmp_arr, inner_collection, reval)
             End If
         
         Else
-            If IsMethodPropOrArrayString(formula_string) Then
-                Call RunMethod(formula_string, inner_collection, reval)
+            ' ***, ***(-)
+            If IsMethodOrPropString(formula_string, inner_collection) Then
+                ' ****(-) (not array)
+                formula_string = GetMethodOrPropNamFrom(formula_string)
+                If TryRunMethod(formula_string, inner_collection, reval) = False Then
+                    ' todo error handle
+                End If
             Else
+                ' ****
                 reval = formula_string
             End If
         End If
     
     Else
+        ' ***.---
         Call GetChildVar(formula_string, inner_collection, parent_object, reval)
     End If
     Exit Function
@@ -739,11 +749,11 @@ Private Function ExtructProcParamString(function_string) As String
 
 End Function
 
-Private Function HasVariable(formula_string As String) As Boolean
+Private Function HasVariableIn(formula_string As String) As Boolean
     Dim v, f As Boolean
     
     For Each v In vars_
-       If InStr(formula_string, v(1)) > 0 Then HasVariable = True: Exit Function
+       If InStr(formula_string, v(1)) > 0 Then HasVariableIn = True: Exit Function
     Next
 
 End Function
