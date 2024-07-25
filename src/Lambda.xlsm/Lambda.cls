@@ -689,10 +689,23 @@ Private Function ArrayCount(arr, Optional d As Long = 1) As Long
 
 End Function
 
-Private Function IsMethodPropOrArrayString(monomical_string) As Boolean
+Private Function IsMethodOrPropString(ByVal monomical_string As String, inner_collection As Collection) As Boolean
     
-    IsMethodPropOrArrayString = InStr(monomical_string, "Call ") > 0
-    If IsMethodPropOrArrayString Then monomical_string = Replace(monomical_string, "Call ", "")
+    If InStr(monomical_string, "Call ") > 0 Then
+        IsMethodOrPropString = True
+    Else
+        IsMethodOrPropString = inner_collection.Count > 0
+    End If
+    
+End Function
+    
+Private Function GetMethodOrPropNamFrom(ByVal method_or_prop_string As String) As String
+    
+    If InStr(method_or_prop_string, "Call ") > 0 Then
+        GetMethodOrPropNamFrom = Replace(method_or_prop_string, "Call ", "")
+    Else
+        GetMethodOrPropNamFrom = method_or_prop_string
+    End If
     
 End Function
 
