@@ -150,7 +150,7 @@ On Error GoTo errLabel
                 End If
             Else
                 ' ****
-                reval = formula_string
+                Call ConvertStringToValue(formula_string, reval)
             End If
         End If
 
@@ -517,7 +517,7 @@ Private Function EvaluetePolynominalCollection(pc As Collection, reval)
         Exit Function
     ElseIf pc.Count = 1 Then
         SetObjectAsBuffer pc(1)(1), reval
-        Call RemoveTags(reval, reval)
+        Call ConvertStringToValue(reval, reval)
         Exit Function
     Else
         reval = RunEvaluatePolynominalCollectionRec(pc)
@@ -631,8 +631,8 @@ End Function
 ' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value, removed_tag_left, removed_tag_right
-    RemoveTags left_value, left_value
-    RemoveTags right_value, right_value
+    ConvertStringToValue left_value, left_value
+    ConvertStringToValue right_value, right_value
 
 On Error GoTo errCalc
     Select Case operator_string
@@ -761,7 +761,7 @@ Private Function IsBoolean(ByVal str) As Boolean
 End Function
 
 
-Private Function RemoveTags(unverfied_value, re_value)
+Private Function ConvertStringToValue(unverfied_value, re_value)
     
     If IsObject(unverfied_value) Then
         Set re_value = unverfied_value
@@ -771,12 +771,18 @@ Private Function RemoveTags(unverfied_value, re_value)
         re_value = unverfied_value
     ElseIf IsBoolean(unverfied_value) Then
         re_value = CBool(unverfied_value)
+        
+    ' string(has tags)
     ElseIf HasTagBy(unverfied_value, TAG_DATE_OPEN) Then
         re_value = DateValue(RemoveTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE))
     ElseIf HasTagBy(unverfied_value, TAG_STRING_OPEN) Then
         re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+        
+    ' numeric
     ElseIf IsNumeric(unverfied_value) Then
         re_value = val(unverfied_value)
+        
+    ' string (has no tags)
     Else
         re_value = unverfied_value
     End If
