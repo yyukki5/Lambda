@@ -217,14 +217,17 @@ Private Function GetVarByVarName(formula_string, reval)
     
 End Function
 
-Private Function TryRunMethod(method_name As String, ic As Collection, reval) As Boolean
+Private Function RunModuleMethod(method_name As String, ic As Collection, reval)
+
 On Error GoTo errLabel
-    If TryRunVbaModuleMethod(method_name, ic, reval) = False Then _
-      Call RunMethod(method_name, ic, reval)
-    TryRunMethod = True
+    If TryRunVbaModuleMethod(method_name, ic, reval) = False Then
+        Call RunGeneralModuleMethod(method_name, ic, reval)
+    End If
     Exit Function
+
 errLabel:
-    TryRunMethod = False
+    If Err.Number = 1004 Then Call Err.Raise(10000, "at Lambda.RunModuleMethod(""" & method_name & """)", "Not found general method : """ & method_name & """" & vbCrLf & "Should write formula name correctly")
+    Err.Raise Err.Number, "at Lambda.RunModuleMethod(""" & method_name & """)", Err.Description
 End Function
 
 Private Function TryRunVbaModuleMethod(method_name As String, args As Collection, reval) As Boolean
