@@ -145,9 +145,7 @@ On Error GoTo errLabel
             If IsMethodOrPropString(formula_string, inner_collection) Then
                 ' ****(-) (not array)
                 formula_string = GetMethodOrPropNamFrom(formula_string)
-                If TryRunMethod(formula_string, inner_collection, reval) = False Then
-                    ' todo error handle
-                End If
+                Call RunModuleMethod(formula_string, inner_collection, reval)
             Else
                 ' ****
                 Call ConvertStringToValue(formula_string, reval)
