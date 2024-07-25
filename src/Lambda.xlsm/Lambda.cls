@@ -213,7 +213,125 @@ Private Function GetVarByVarName(formula_string, reval)
         End If
     Next
     Call Err.Raise(11000, "Lambda.GetVarByVarName()", "not found variable")
+Private Function TryRunMethod(method_name As String, ic As Collection, reval) As Boolean
+On Error GoTo errLabel
+    If TryRunVbaModuleMethod(method_name, ic, reval) = False Then _
+      Call RunMethod(method_name, ic, reval)
+    TryRunMethod = True
+    Exit Function
+errLabel:
+    TryRunMethod = False
+End Function
+
+Private Function TryRunVbaModuleMethod(method_name As String, args As Collection, reval) As Boolean
+On Error GoTo errLabel
+    Dim a As Collection: Set a = args
+   Select Case method_name
+        Case "Abs":     Let reval = VBA.Abs(a(1))
+        Case "Array":  Let reval = VBA.Array(CollectionToArray(a))
+        Case "Asc": Let reval = VBA.Asc(a(1))
+        Case "CBool": Let reval = VBA.CBool(a(1))
+        Case "CByte": Let reval = VBA.CByte(a(1))
+        Case "CCur": Let reval = VBA.CCur(a(1))
+        Case "CDate": Let reval = VBA.CDate(a(1))
+        Case "CDbl": Let reval = VBA.CDbl(a(1))
+        Case "CDec": Let reval = VBA.CDec(a(1))
+        Case "CInt": Let reval = VBA.CInt(a(1))
+        Case "CLng": Let reval = VBA.CLng(a(1))
+        Case "CLngLng": Let reval = VBA.CLngLng(a(1))
+        Case "CLngPtr": Let reval = VBA.CLngPtr(a(1))
+        Case "CSng": Let reval = VBA.CSng(a(1))
+        Case "CStr": Let reval = VBA.CStr(a(1))
+        Case "CVar": Let reval = VBA.CVar(a(1))
+        Case "DateValue": Let reval = VBA.DateValue(a(1))
+        Case "DoEvents": VBA.DoEvents
+        Case "Environ": Let reval = VBA.Environ(a(1))
+        Case "Fix": Let reval = VBA.Fix(a(1))
+        Case "Format"
+            If a.Count = 1 Then
+                Let reval = VBA.Format(a(1))
+            ElseIf a.Count = 2 Then:
+                Let reval = VBA.Format(a(1), a(2))
+            ElseIf a.Count = 3 Then:
+                Let reval = VBA.Format(a(1), a(2), a(2))
+            ElseIf a.Count = 4 Then:
+                Let reval = VBA.Format(a(1), a(2), a(3), a(4))
+            Else
+            End If
+        Case "Hex": Let reval = VBA.Hex(a(1))
+        Case "IIf":        Let reval = VBA.IIf(a(1), a(2), a(3))
+        Case "InStr"
+            If a.Count < 2 Then
+            ElseIf a.Count = 2 Then reval = InStr(a(1), a(2))
+            ElseIf a.Count = 3 Then reval = InStr(a(1), a(2), a(3))
+            ElseIf a.Count = 4 Then reval = InStr(a(1), a(2), a(3), a(4))
+            Else
+            End If
+        Case "IsArray": Let reval = VBA.IsArray(a(1))
+        Case "IsDate": Let reval = VBA.IsDate(a(1))
+        Case "IsEmpty": Let reval = VBA.IsEmpty(a(1))
+        Case "IsError": Let reval = VBA.IsError(a(1))
+        Case "IsNull": Let reval = VBA.IsNull(a(1))
+        Case "IsNumeric": Let reval = VBA.IsNumeric(a(1))
+        Case "IsObject": Let reval = VBA.IsObject(a(1))
+        Case "Join"
+            If a.Count = 1 Then
+                Let reval = VBA.Join(a(1))
+            ElseIf a.Count = 2 Then
+                Let reval = VBA.Join(a(1), a(2))
+            Else
+            End If
+        Case "LCase": Let reval = VBA.LCase(a(1))
+        Case "UCase": Let reval = VBA.UCase(a(1))
+        Case "Left": Let reval = VBA.Left(a(1), a(2))
+        Case "Len": Let reval = VBA.Len(a(1))
+        Case "LTrim": Let reval = VBA.LTrim(a(1))
+        Case "Mid"
+            If a.Count = 1 Then
+            ElseIf a.Count = 2 Then: Let reval = VBA.Mid(a(1), a(2))
+            ElseIf a.Count = 3 Then: Let reval = VBA.Mid(a(1), a(2), a(3))
+            Else
+            End If
+        Case "Replace"
+            If a.Count < 3 Then
+            ElseIf a.Count = 3 Then Let reval = VBA.Replace(a(1), a(2), a(3))
+            ElseIf a.Count = 4 Then Let reval = VBA.Replace(a(1), a(2), a(3), a(4))
+            ElseIf a.Count = 5 Then Let reval = VBA.Replace(a(1), a(2), a(3), a(4), a(5))
+            ElseIf a.Count = 6 Then Let reval = VBA.Replace(a(1), a(2), a(3), a(4), a(5), a(6))
+            Else
+            End If
+        Case "Right": Let reval = VBA.Right(a(1), a(2))
+        Case "Round"
+            If a.Count = 1 Then
+                Let reval = VBA.Round(a(1))
+            ElseIf a.Count = 2 Then
+                Let reval = VBA.Round(a(1), a(2))
+            Else
+            End If
+        Case "RTrim": Let reval = VBA.RTrim(a(1))
+        Case "Split"
+            If a.Count = 1 Then
+                Let reval = VBA.Split(a(1))
+            ElseIf a.Count = 2 Then
+                Let reval = VBA.Split(a(1), a(2))
+            ElseIf a.Count = 3 Then
+                Let reval = VBA.Split(a(1), a(2), a(3))
+            ElseIf a.Count = 4 Then
+                Let reval = VBA.Split(a(1), a(2), a(3), a(4))
+            Else
+            End If
+        Case "Trim": Let reval = VBA.Trim(a(1))
+        Case "Val": Let reval = VBA.val(a(1))
+        Case "VarType": Let reval = VBA.VarType(a(1))
+        Case Else
+            TryRunVbaModuleMethod = False
+            Exit Function
+   End Select
+   TryRunVbaModuleMethod = True
+   Exit Function
     
+errLabel:
+    Call Err.Raise(11000, Err.Source & vbCrLf & "at Lambda.TryRunVbaModuleMethod()", Err.Description)
 End Function
 
 Private Function RunMethod(method_name As String, ic As Collection, reval)
