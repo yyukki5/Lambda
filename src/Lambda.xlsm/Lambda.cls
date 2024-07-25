@@ -233,7 +233,7 @@ On Error GoTo errLabel
     Dim a As Collection: Set a = args
    Select Case method_name
         Case "Abs":     Let reval = VBA.Abs(a(1))
-        Case "Array":  Let reval = VBA.Array(CollectionToArray(a))
+        Case "Array":  Let reval = CollectionToArray(a)
         Case "Asc": Let reval = VBA.Asc(a(1))
         Case "CBool": Let reval = VBA.CBool(a(1))
         Case "CByte": Let reval = VBA.CByte(a(1))
