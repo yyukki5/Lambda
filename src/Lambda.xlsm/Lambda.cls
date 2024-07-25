@@ -354,10 +354,16 @@ End Function
 
 
 Private Function SplitByComma(str As String) As Collection
-    Dim i As Long, col As New Collection, tmp As String
+    Dim i As Long, col As New Collection, tmp As String, cntPar As Long
     
     For i = 1 To Len(str)
-        If Mid(str, i, 1) = "," Then
+        Select Case Mid(str, i, 1)
+            Case "(":             Let cntPar = cntPar + 1
+            Case ")":             Let cntPar = cntPar - 1
+            Case Else
+        End Select
+        
+        If Mid(str, i, 1) = "," And cntPar = 0 Then
             col.Add tmp
             tmp = ""
         Else
