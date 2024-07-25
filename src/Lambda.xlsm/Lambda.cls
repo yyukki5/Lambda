@@ -338,8 +338,9 @@ errLabel:
     Call Err.Raise(11000, Err.Source & vbCrLf & "at Lambda.TryRunVbaModuleMethod()", Err.Description)
 End Function
 
-Private Function RunMethod(method_name As String, ic As Collection, reval)
+Private Function RunGeneralModuleMethod(method_name As String, ic As Collection, reval)
     
+On Error GoTo errLabel
     Select Case ic.Count
     Case 0:   Call SetObjectAsBuffer(Application.Run(method_name), reval)
     Case 1:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1)), reval)
@@ -349,9 +350,13 @@ Private Function RunMethod(method_name As String, ic As Collection, reval)
     Case 5:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5)), reval)
     Case 6:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), reval)
     Case Else
-        Call Err.Raise(11000, "Lambda.RunMethod()", "arguments is over")
+        On Error GoTo 0
+        Call Err.Raise(11000, "Lambda.RunGeneralModuleMethod(""" & method_name & """)", "arguments is over")
     End Select
+    Exit Function
     
+errLabel:
+    Call Err.Raise(Err.Number, "at Lambda.RunGeneralModuleMethod(""" & method_name & """)", Err.Description)
 End Function
 
 Private Function GetArrayElement(arr, ic As Collection, reval)
