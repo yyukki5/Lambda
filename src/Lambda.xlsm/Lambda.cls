@@ -63,6 +63,7 @@ On Error GoTo errLabel
     Exit Function
     
 errLabel:
+    Debug.Print Err.Description & vbCrLf & Err.Source
     Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
 End Function
 
@@ -89,7 +90,7 @@ On Error GoTo errLabel
     Exit Function
 
 errLabel:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ParsePolynominal(" & polynominal_string & ")", Err.Description
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ParsePolynominal(""" & polynominal_string & """)", Err.Description
 End Function
 
 
@@ -152,7 +153,7 @@ On Error GoTo errLabel
                 reval = formula_string
             End If
         End If
-    
+
     Else
         ' ***.---
         Call GetChildVar(formula_string, inner_collection, parent_object, reval)
@@ -160,7 +161,7 @@ On Error GoTo errLabel
     Exit Function
     
 errLabel:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.EvaluateMonominalObject()", Err.Description
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.EvaluateMonominalObject(""" & formula_string & """)", Err.Description
 End Function
 
 Private Function GetChildVar(formula_string As String, inner_collection As Collection, parent_object, reval)
@@ -212,7 +213,10 @@ Private Function GetVarByVarName(formula_string, reval)
             Exit Function
         End If
     Next
-    Call Err.Raise(11000, "Lambda.GetVarByVarName()", "not found variable")
+    Call Err.Raise(11000, "Lambda.GetVarByVarName(""" & formula_string & """)", "not found variable : """ & formula_string & """")
+    
+End Function
+
 Private Function TryRunMethod(method_name As String, ic As Collection, reval) As Boolean
 On Error GoTo errLabel
     If TryRunVbaModuleMethod(method_name, ic, reval) = False Then _
@@ -329,7 +333,7 @@ On Error GoTo errLabel
    End Select
    TryRunVbaModuleMethod = True
    Exit Function
-    
+
 errLabel:
     Call Err.Raise(11000, Err.Source & vbCrLf & "at Lambda.TryRunVbaModuleMethod()", Err.Description)
 End Function
@@ -546,7 +550,7 @@ nextloop:
     
     ' not found matched operator
 errCalculate:
-    Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.RunEvaluatePolynominalCollectionRec" ' (" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
+    Err.Raise 9001, Err.Source & vbCrLf & "at Lambda.RunEvaluatePolynominalCollectionRec()", Err.Description & vbCrLf & "failed to calculate by operator: " & o
 End Function
 
 
@@ -660,7 +664,7 @@ On Error GoTo errCalc
     CalculateOperator = calculated_value
     Exit Function
 errCalc:
-    Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
+    Err.Raise 9001, "at Lambda.CalculateOperator()", "failed to calculate. formula string has error : " & left_value & " " & operator_string & " " & right_value
 End Function
 
 
@@ -832,7 +836,7 @@ Private Function IsMethodOrPropString(ByVal monomical_string As String, inner_co
     End If
     
 End Function
-    
+
 Private Function GetMethodOrPropNamFrom(ByVal method_or_prop_string As String) As String
     
     If InStr(method_or_prop_string, "Call ") > 0 Then
@@ -842,6 +846,7 @@ Private Function GetMethodOrPropNamFrom(ByVal method_or_prop_string As String) A
     End If
     
 End Function
+
 
 Private Function ExtructProcNameParamString(function_string, ByRef proc_name, ByRef param_string)
     Dim index_parenthes_open, l, r
