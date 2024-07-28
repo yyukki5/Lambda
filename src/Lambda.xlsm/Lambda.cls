@@ -12,11 +12,17 @@ Option Explicit
 
 ' ----------------------------------------------------
 ' Project   : https://github.com/yyukki5/Lambda
-' Version   : 0.4.0
+' Version   : 0.5.0
 ' ---
 ' try to simply calculate by not using Evaluate().
-
+'
+' supported
+'  - return object
+'  - multi arguments
+'  - user defined general module funcitons
+'  - some VBA module functions
 ' unsupported
+'  - assigning value
 '  - multi lines
 ' ----------------------------------------------------
 
