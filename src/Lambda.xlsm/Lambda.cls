@@ -12,64 +12,670 @@ Option Explicit
 
 ' ----------------------------------------------------
 ' Project   : https://github.com/yyukki5/Lambda
-' Version   : 0.3.0
+' Version   : 0.5.0
 ' ---
 ' try to simply calculate by not using Evaluate().
-
-' unsupported
+'
+' supported
+'  - return object
 '  - multi arguments
+'  - user defined general module funcitons
+'  - some VBA module functions
+' unsupported
+'  - assigning value
 '  - multi lines
 ' ----------------------------------------------------
+
+Private Const IS_DEBUG_MODE As Boolean = False
 
 Private Const TAG_STRING_OPEN As String = "<string "
 Private Const TAG_STRING_CLOSE As String = " string/>"
 Private Const TAG_DATE_OPEN As String = "<date "
 Private Const TAG_DATE_CLOSE As String = " date/>"
 
-Private var_
+Private vars_
 Private lambdaString_ As String
+
+Private Enum lmVarType
+    lmVarTypeVar
+    lmVarTypeName
+End Enum
+
+Private Enum lmValueType
+    lmIsOpe
+    lmValue
+End Enum
+
+Private Enum lmPolynominalParseCase
+    lmBlank
+    lmOpe
+    lmMono
+    lmPoly
+End Enum
+
 
 Public Function Initialize(var, lambda_string As String) As Lambda
 Attribute Initialize.VB_UserMemId = 0
-    Call SetObjectAsBuffer(var, var_)
-    lambdaString_ = lambda_string
+    Call ValidateLambdaString(lambda_string)
+    
+    lambdaString_ = GetFormulaString(lambda_string)
+    Set vars_ = GetVars(var, GetVarStrings(lambda_string))
+    
     Set Initialize = Me
+    
+    If IS_DEBUG_MODE Then Debug.Print vbCrLf & " - Lambda string : " & lambdaString_
 End Function
 
 Public Function Evaluate()
-    Dim eval_var, var_string As String, formula_string As String, parsed_string As String, calculated_value, evaluated_value
 
-    On Error GoTo errEvaluate
-    Call AddTag(var_, eval_var)
-
-    Call ValidateLambdaString(lambdaString_)
-    var_string = GetVarString(lambdaString_)
-    formula_string = GetFormulaString(lambdaString_)
-    
-    parsed_string = ParseParentheses(eval_var, var_string, formula_string)
-    Call TryConvertPolynominalToValue(eval_var, var_string, parsed_string, evaluated_value)
-    Call RemoveTags(evaluated_value, Evaluate)
+On Error GoTo errLabel
+    Call ParsePolynominal(lambdaString_, Evaluate)
+    Call RemoveTagAs(Evaluate, TAG_STRING_OPEN, TAG_STRING_CLOSE)
     Exit Function
     
-errEvaluate:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
+errLabel:
+    If IS_DEBUG_MODE Then Debug.Print Err.Description & vbCrLf & Err.Source
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description & vbCrLf & Err.Source
 End Function
 
 
 
 'Private ---------------------------------------------
+Private Function ParsePolynominal(polynominal_string As String, reval) As Variant
+    Dim polynominal_collection As Collection, polynominal_collection_re As New Collection, p
+    
+On Error GoTo errLabel
+    Set polynominal_collection = SplitPolynominal(polynominal_string)
+    
+    For Each p In polynominal_collection
+        Select Case p(lmIsOpe)
+        Case lmPoly
+            Call ParsePolynominal((p(lmValue)), p(lmValue))
+        Case lmMono
+            Call ConvertMonominalStringToValue((p(lmValue)), p(lmValue))
+        End Select
+        Call polynominal_collection_re.Add(p)
+    Next
+    
+    Call EvaluetePolynominalCollection(polynominal_collection_re, reval)
+    Exit Function
+
+errLabel:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.ParsePolynominal(""" & polynominal_string & """)", Err.Description
+End Function
+
+
+Private Function ConvertMonominalStringToValue(monominal_string As String, reval) As Variant
+    Dim monominal_collection As Collection, tmp, m, p
+    If IS_DEBUG_MODE Then Debug.Print " -- ConvertMonominalStringToValue : " & monominal_string
+    
+    Set monominal_collection = SplitMonominalStringByDot(monominal_string)
+    For Each m In monominal_collection
+        Call SetObjectAsBuffer(ConvertMonominalObjectToValue(m, p), p)
+    Next
+    Call SetObjectAsBuffer(p, reval)
+    
+End Function
+
+Private Function ConvertMonominalObjectToValue(object_string, parent_object) As Variant
+    Dim formula_string As String, inner_string As String, inner_collection As Collection, inner_collection_re As New Collection, ic, tmp
+    
+    Call ExtructProcNameParamString(object_string, formula_string, inner_string)
+    Set inner_collection = SplitByComma(inner_string)
+    
+    For Each ic In inner_collection
+        Call ParsePolynominal((ic), tmp)
+        Call inner_collection_re.Add(tmp)
+    Next ic
+    Set inner_collection = inner_collection_re
+    
+    Call EvaluateMonominalObject(formula_string, inner_collection, parent_object, ConvertMonominalObjectToValue)
+
+End Function
+
+Private Function EvaluateMonominalObject(formula_string As String, inner_collection As Collection, parent_object, ByRef reval) As Variant
+
+On Error GoTo errLabel
+    formula_string = Trim(formula_string)
+    
+    If IsNullOrEmptyOrNothing(parent_object) Then
+        ' ****, ****(-), x
+    
+        If HasVariableIn(formula_string) Then
+            ' x, x(-)
+            Call GetVarByVarName(formula_string, reval)
+            
+            If IsArray(reval) And inner_collection.Count > 0 Then
+                ' x(-)
+                Dim tmp_arr
+                tmp_arr = reval: reval = Null
+                Call GetArrayElement(tmp_arr, inner_collection, reval)
+            End If
+        
+        Else
+            ' ***, ***(-)
+            If IsMethodOrPropString(formula_string, inner_collection) Then
+                ' ****(-) (not array)
+                formula_string = GetMethodOrPropNamFrom(formula_string)
+                Call RunModuleMethod(formula_string, inner_collection, reval)
+            Else
+                ' ****
+                Call ConvertStringToValue(formula_string, reval)
+            End If
+        End If
+
+    Else
+        ' ***.---
+        Call GetChildVar(formula_string, inner_collection, parent_object, reval)
+    End If
+    
+    If IS_DEBUG_MODE Then
+        Dim str As String, f As Boolean
+        If VarType(reval) = vbString Then str = reval: f = True
+        If IsNumeric(reval) Then str = CStr(reval): f = True
+        If f Then Debug.Print " ----- EvaluateMonominalObject : " & formula_string & " -> " & str
+    End If
+    Exit Function
+    
+errLabel:
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.EvaluateMonominalObject(""" & formula_string & """)", Err.Description
+End Function
+
+Private Function GetChildVar(formula_string As String, inner_collection As Collection, parent_object, reval)
+    Dim arguments, err_num As Long, err_des, tmp
+    
+    If inner_collection.Count > 0 Then
+        
+        On Error Resume Next
+        Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), reval)
+        Err.Clear
+        
+        If IsArray(reval) Then
+            Dim tmp_arr
+            tmp_arr = reval: reval = Null
+            Call GetArrayElement(tmp_arr, inner_collection, reval)
+        ElseIf IsEmpty(reval) Then
+            arguments = CollectionToArray(inner_collection)
+            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet, arguments), reval)
+            If Err.Number = 450 Then
+                Err.Clear
+                Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbMethod, arguments), reval)
+            End If
+            If Err.Number <> 0 Then err_num = Err.Number: err_des = Err.Description
+            On Error GoTo 0:    If err_num <> 0 Then Call Err.Raise(err_num, "Lambda.GetChildVar()", err_des)
+        Else
+            On Error GoTo 0:    Call Err.Raise(11000, "Lambda.GetChildVar()", "undefined error")
+        End If
+    Else
+    
+        On Error Resume Next
+        Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbGet), reval)
+        If Err.Number = 450 Then
+            Err.Clear
+            Call SetObjectAsBuffer(CallByName(parent_object, formula_string, VbMethod), reval)
+        End If
+        If Err.Number <> 0 Then err_num = Err.Number: err_des = Err.Description
+        On Error GoTo 0:   If err_num <> 0 Then Call Err.Raise(err_num, "GetChildVar()", err_des)
+    End If
+    
+    
+End Function
+
+Private Function GetVarByVarName(formula_string, reval)
+    Dim v
+    
+    For Each v In vars_
+        If formula_string = v(lmVarTypeName) Then
+            Call SetObjectAsBuffer(v(lmVarTypeVar), reval)
+            Exit Function
+        End If
+    Next
+    Call Err.Raise(11000, "Lambda.GetVarByVarName(""" & formula_string & """)", "not found variable : """ & formula_string & """")
+    
+End Function
+
+Private Function RunModuleMethod(method_name As String, ic As Collection, reval)
+
+On Error GoTo errLabel
+    If TryRunVbaModuleMethod(method_name, ic, reval) = False Then
+        Call RunGeneralModuleMethod(method_name, ic, reval)
+    End If
+    Exit Function
+
+errLabel:
+    If Err.Number = 1004 Then Call Err.Raise(10000, "at Lambda.RunModuleMethod(""" & method_name & """)", "Not found general method : """ & method_name & """" & vbCrLf & "Should write formula name correctly")
+    Err.Raise Err.Number, "at Lambda.RunModuleMethod(""" & method_name & """)", Err.Description
+End Function
+
+Private Function TryRunVbaModuleMethod(method_name As String, args As Collection, reval) As Boolean
+On Error GoTo errLabel
+    Dim a As Collection: Set a = args
+   Select Case method_name
+        Case "Abs":     Let reval = VBA.Abs(a(1))
+        Case "Array":  Let reval = CollectionToArray(a)
+        Case "Asc": Let reval = VBA.Asc(a(1))
+        Case "CBool": Let reval = VBA.CBool(a(1))
+        Case "CByte": Let reval = VBA.CByte(a(1))
+        Case "CCur": Let reval = VBA.CCur(a(1))
+        Case "CDate": Let reval = VBA.CDate(a(1))
+        Case "CDbl": Let reval = VBA.CDbl(a(1))
+        Case "CDec": Let reval = VBA.CDec(a(1))
+        Case "CInt": Let reval = VBA.CInt(a(1))
+        Case "CLng": Let reval = VBA.CLng(a(1))
+        Case "CLngLng": Let reval = VBA.CLngLng(a(1))
+        Case "CLngPtr": Let reval = VBA.CLngPtr(a(1))
+        Case "CSng": Let reval = VBA.CSng(a(1))
+        Case "CStr": Let reval = VBA.CStr(a(1))
+        Case "CVar": Let reval = VBA.CVar(a(1))
+        Case "DateValue": Let reval = VBA.DateValue(a(1))
+        Case "DoEvents": VBA.DoEvents
+        Case "Environ": Let reval = VBA.Environ(a(1))
+        Case "Fix": Let reval = VBA.Fix(a(1))
+        Case "Format"
+            If a.Count = 1 Then
+                Let reval = VBA.Format(a(1))
+            ElseIf a.Count = 2 Then:
+                Let reval = VBA.Format(a(1), a(2))
+            ElseIf a.Count = 3 Then:
+                Let reval = VBA.Format(a(1), a(2), a(2))
+            ElseIf a.Count = 4 Then:
+                Let reval = VBA.Format(a(1), a(2), a(3), a(4))
+            Else
+            End If
+        Case "Hex": Let reval = VBA.Hex(a(1))
+        Case "IIf":        Let reval = VBA.IIf(a(1), a(2), a(3))
+        Case "InStr"
+            If a.Count < 2 Then
+            ElseIf a.Count = 2 Then reval = InStr(a(1), a(2))
+            ElseIf a.Count = 3 Then reval = InStr(a(1), a(2), a(3))
+            ElseIf a.Count = 4 Then reval = InStr(a(1), a(2), a(3), a(4))
+            Else
+            End If
+        Case "IsArray": Let reval = VBA.IsArray(a(1))
+        Case "IsDate": Let reval = VBA.IsDate(a(1))
+        Case "IsEmpty": Let reval = VBA.IsEmpty(a(1))
+        Case "IsError": Let reval = VBA.IsError(a(1))
+        Case "IsNull": Let reval = VBA.IsNull(a(1))
+        Case "IsNumeric": Let reval = VBA.IsNumeric(a(1))
+        Case "IsObject": Let reval = VBA.IsObject(a(1))
+        Case "Join"
+            If a.Count = 1 Then
+                Let reval = VBA.Join(a(1))
+            ElseIf a.Count = 2 Then
+                Let reval = VBA.Join(a(1), a(2))
+            Else
+            End If
+        Case "LCase": Let reval = VBA.LCase(a(1))
+        Case "UCase": Let reval = VBA.UCase(a(1))
+        Case "LBound": Let reval = LBound(a(1))
+        Case "UBound": Let reval = UBound(a(1))
+        Case "Left": Let reval = VBA.Left(a(1), a(2))
+        Case "Len": Let reval = VBA.Len(a(1))
+        Case "LTrim": Let reval = VBA.LTrim(a(1))
+        Case "Mid"
+            If a.Count = 1 Then
+            ElseIf a.Count = 2 Then: Let reval = VBA.Mid(a(1), a(2))
+            ElseIf a.Count = 3 Then: Let reval = VBA.Mid(a(1), a(2), a(3))
+            Else
+            End If
+        Case "Replace"
+            If a.Count < 3 Then
+            ElseIf a.Count = 3 Then Let reval = VBA.Replace(a(1), a(2), a(3))
+            ElseIf a.Count = 4 Then Let reval = VBA.Replace(a(1), a(2), a(3), a(4))
+            ElseIf a.Count = 5 Then Let reval = VBA.Replace(a(1), a(2), a(3), a(4), a(5))
+            ElseIf a.Count = 6 Then Let reval = VBA.Replace(a(1), a(2), a(3), a(4), a(5), a(6))
+            Else
+            End If
+        Case "Right": Let reval = VBA.Right(a(1), a(2))
+        Case "Round"
+            If a.Count = 1 Then
+                Let reval = VBA.Round(a(1))
+            ElseIf a.Count = 2 Then
+                Let reval = VBA.Round(a(1), a(2))
+            Else
+            End If
+        Case "RTrim": Let reval = VBA.RTrim(a(1))
+        Case "Split"
+            If a.Count = 1 Then
+                Let reval = VBA.Split(a(1))
+            ElseIf a.Count = 2 Then
+                Let reval = VBA.Split(a(1), a(2))
+            ElseIf a.Count = 3 Then
+                Let reval = VBA.Split(a(1), a(2), a(3))
+            ElseIf a.Count = 4 Then
+                Let reval = VBA.Split(a(1), a(2), a(3), a(4))
+            Else
+            End If
+        Case "Trim": Let reval = VBA.Trim(a(1))
+        Case "Val": Let reval = VBA.val(a(1))
+        Case "VarType": Let reval = VBA.VarType(a(1))
+        Case Else
+            TryRunVbaModuleMethod = False
+            Exit Function
+   End Select
+   TryRunVbaModuleMethod = True
+   Exit Function
+
+errLabel:
+    Call Err.Raise(11000, Err.Source & vbCrLf & "at Lambda.TryRunVbaModuleMethod()", Err.Description)
+End Function
+
+Private Function RunGeneralModuleMethod(method_name As String, ic As Collection, reval)
+    
+On Error GoTo errLabel
+    Select Case ic.Count
+    Case 0:   Call SetObjectAsBuffer(Application.Run(method_name), reval)
+    Case 1:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1)), reval)
+    Case 2:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2)), reval)
+    Case 3:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3)), reval)
+    Case 4:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4)), reval)
+    Case 5:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5)), reval)
+    Case 6:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), reval)
+    Case 7:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7)), reval)
+    Case 8:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8)), reval)
+    Case 9:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9)), reval)
+    Case 10:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10)), reval)
+    Case 11:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11)), reval)
+    Case 12:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12)), reval)
+    Case 13:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13)), reval)
+    Case 14:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14)), reval)
+    Case 15:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15)), reval)
+    Case 16:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16)), reval)
+    Case 17:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17)), reval)
+    Case 18:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18)), reval)
+    Case 19:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19)), reval)
+    Case 20:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20)), reval)
+    Case 21:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21)), reval)
+    Case 22:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22)), reval)
+    Case 23:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23)), reval)
+    Case 24:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24)), reval)
+    Case 25:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24), ic(25)), reval)
+    Case 26:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24), ic(25), ic(26)), reval)
+    Case 27:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24), ic(25), ic(26), ic(27)), reval)
+    Case 28:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24), ic(25), ic(26), ic(27), ic(28)), reval)
+    Case 29:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24), ic(25), ic(26), ic(27), ic(28), ic(29)), reval)
+    Case 30:   Call SetObjectAsBuffer(Application.Run(method_name, ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10), ic(11), ic(12), ic(13), ic(14), ic(15), ic(16), ic(17), ic(18), ic(19), ic(20), ic(21), ic(22), ic(23), ic(24), ic(25), ic(26), ic(27), ic(28), ic(29), ic(30)), reval)
+    Case Else
+        On Error GoTo 0
+        Call Err.Raise(11000, "Lambda.RunGeneralModuleMethod(""" & method_name & """)", "arguments is over")
+    End Select
+    Exit Function
+    
+errLabel:
+    Call Err.Raise(Err.Number, "at Lambda.RunGeneralModuleMethod(""" & method_name & """)", Err.Description)
+End Function
+
+Private Function GetArrayElement(arr, ic As Collection, reval)
+        
+    Select Case ic.Count
+    Case 1:   Call SetObjectAsBuffer(arr(ic(1)), reval)
+    Case 2:   Call SetObjectAsBuffer(arr(ic(1), ic(2)), reval)
+    Case 3:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3)), reval)
+    Case 4:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4)), reval)
+    Case 5:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5)), reval)
+    Case 6:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6)), reval)
+    Case 7:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7)), reval)
+    Case 8:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8)), reval)
+    Case 9:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9)), reval)
+    Case 10:   Call SetObjectAsBuffer(arr(ic(1), ic(2), ic(3), ic(4), ic(5), ic(6), ic(7), ic(8), ic(9), ic(10)), reval)
+    Case Else
+        Call Err.Raise(11000, "Lambda.GetArrayElement()", "arguments is over")
+    End Select
+    
+End Function
+
+Private Function SplitMonominalStringByDot(ByVal monominal_strring) As Collection
+    Dim cntPar As Long, i As Long, right_string, left_string
+    Dim monominal_collection As New Collection
+    
+    Let right_string = monominal_strring
+    Do While right_string <> ""
+        Let i = 1
+        i = i + GetTagSpanLengthWithStarted(right_string)
+        Select Case Mid(right_string, i, 1)
+        Case "(":             Let cntPar = cntPar + 1
+        Case ")":             Let cntPar = cntPar - 1
+        End Select
+        
+        Let left_string = left_string & Left(right_string, i)
+        Let right_string = Mid(right_string, i + 1)
+        If cntPar = 0 And IsStartWithDot(right_string) Then
+            Call monominal_collection.Add(left_string)
+            left_string = ""
+            right_string = Mid(right_string, i + 1)
+        End If
+    Loop
+    Call monominal_collection.Add(left_string)
+    Set SplitMonominalStringByDot = monominal_collection
+    
+End Function
+
+Private Function IsStartWithDot(str) As Boolean
+
+    If Left(str, 1) = "." Then IsStartWithDot = True Else IsStartWithDot = False
+    
+End Function
+
+Private Function SplitPolynominal(ByVal polynoimnal_string As String) As Collection
+    Dim polynoimal_collection As New Collection
+    Dim left_string As String, right_string As String, ope As String
+    
+    Let right_string = polynoimnal_string
+    Do While right_string <> ""
+        Select Case SplitPolynoinalString(right_string, left_string, right_string, ope)
+        Case lmOpe:        Call polynoimal_collection.Add(Array(lmOpe, ope))
+        Case lmMono:     Call polynoimal_collection.Add(Array(lmMono, left_string))
+        Case lmPoly:        Call polynoimal_collection.Add(Array(lmPoly, GetInnerStringsClosedBy(left_string, "(")))
+        End Select
+    Loop
+    Set SplitPolynominal = polynoimal_collection
+
+End Function
+
+Private Function SplitPolynoinalString(str As String, left_string As String, right_string As String, ope As String) As lmPolynominalParseCase
+    
+    If IsStartedWithTags(str) Then
+        Let SplitPolynoinalString = lmMono
+        Call SplitFirstOperator(str, left_string, right_string)
+        Let ope = ""
+    ElseIf IsOperator(str) Then
+        Call SplitByOperator(str, ope, right_string)
+        Let left_string = ""
+        Let SplitPolynoinalString = lmOpe
+    ElseIf Mid(str, 1, 1) = " " Then
+        Let right_string = Mid(str, 1 + 1)
+        SplitPolynoinalString = lmBlank
+    ElseIf IsParenthese(str) Then
+        Let SplitPolynoinalString = lmPoly
+        Call SplitFirsrParenthese(str, left_string, right_string)
+        Let ope = ""
+    Else
+        Let SplitPolynoinalString = lmMono
+        Call SplitFirstOperator(str, left_string, right_string)
+        Let ope = ""
+    End If
+
+End Function
+
+Private Function SplitFirsrParenthese(ByVal str, left_string, right_string)
+    Dim cntPar As Long, i As Long
+
+    right_string = str
+    For i = 1 To Len(str)
+        i = i + GetTagSpanLengthWithStarted(right_string)
+        Select Case Mid(str, i, 1)
+        Case "(":             Let cntPar = cntPar + 1
+        Case ")":             Let cntPar = cntPar - 1
+        Case Else
+        End Select
+        
+        Let left_string = Left(str, i)
+        Let right_string = Mid(str, i + 1)
+        If cntPar = 0 Then Exit Function
+    Next i
+
+End Function
+
+Private Function IsParenthese(str) As Boolean
+    If Left(str, 1) = "(" Then IsParenthese = True Else IsParenthese = False
+End Function
+
+Private Function SplitFirstOperator(ByVal str As String, left_string As String, right_string As String)
+    Dim cntPar As Long, i As Long
+
+    right_string = str
+    For i = 1 To Len(str)
+        i = i + GetTagSpanLengthWithStarted(right_string)
+        Select Case Mid(str, i, 1)
+        Case "(":             Let cntPar = cntPar + 1
+        Case ")":             Let cntPar = cntPar - 1
+        Case Else
+        End Select
+        
+        Let left_string = Left(str, i)
+        Let right_string = Mid(str, i + 1)
+        If cntPar = 0 And IsOperator(right_string) Then Exit Function
+    Next i
+
+End Function
+
+
+Private Function SplitByComma(str As String) As Collection
+    Dim i As Long, col As New Collection, tmp As String, temp_string As String, cntPar As Long, cntTag As Long
+    
+    For i = 1 To Len(str)
+        temp_string = Mid(str, i)
+        If HasTagBy(temp_string, TAG_STRING_OPEN) Then
+            cntTag = cntTag + 1
+        ElseIf HasTagBy(temp_string, TAG_STRING_CLOSE) Then
+            cntTag = cntTag - 1
+        ElseIf Mid(temp_string, 1, 1) = "(" Then
+            Let cntPar = cntPar + 1
+        ElseIf Mid(temp_string, 1, 1) = ")" Then
+            Let cntPar = cntPar - 1
+        Else
+        End If
+        
+        If Mid(str, i, 1) = "," And cntPar = 0 And cntTag = 0 Then
+            col.Add tmp
+            tmp = ""
+        Else
+            tmp = tmp & Mid(str, i, 1)
+        End If
+    Next i
+    If tmp <> "" Then col.Add tmp
+    Set SplitByComma = col
+End Function
+
+Private Function SplitByOperator(str, ope, right_str)
+    ope = TakeOperator(str)
+    right_str = Mid(str, Len(ope) + 1)
+End Function
+
+Private Function EvaluetePolynominalCollection(pc As Collection, reval)
+    
+    If pc.Count = 0 Then
+        Exit Function
+    ElseIf pc.Count = 1 Then
+        SetObjectAsBuffer pc(1)(1), reval
+        Call ConvertStringToValue(reval, reval)
+        Exit Function
+    Else
+        reval = RunEvaluatePolynominalCollectionRec(pc)
+    End If
+    
+End Function
+
+' "1 + 2 * 2"  -> 1 + 4 -> 5 (calculate each operators.(recursively called by self))
+Private Function RunEvaluatePolynominalCollectionRec(pc As Collection)
+    Dim i As Long, o, vl, vr
+    Dim left_col As Collection, right_col As Collection
+    Dim re As Variant
+
+On Error GoTo errCalculate
+    
+    If pc.Count = 0 Then SetObjectAsBuffer re, RunEvaluatePolynominalCollectionRec: Exit Function
+    If pc.Count = 1 Then SetObjectAsBuffer pc(1)(1), RunEvaluatePolynominalCollectionRec: Exit Function
+    
+    For Each o In Operators
+        
+        If SplitCollectionByOpartor(pc, o, left_col, right_col) = False Then GoTo nextloop
+        
+        ' found matched operator
+        vl = RunEvaluatePolynominalCollectionRec(left_col)
+        vr = RunEvaluatePolynominalCollectionRec(right_col)
+        RunEvaluatePolynominalCollectionRec = CalculateOperator(operator_string:=o, left_value:=vl, right_value:=vr)
+        Exit Function
+nextloop:
+    Next
+    
+    ' not found matched operator
+errCalculate:
+    Err.Raise 9001, Err.Source & vbCrLf & "at Lambda.RunEvaluatePolynominalCollectionRec()", Err.Description & vbCrLf & "failed to calculate by operator: " & o
+End Function
+
+
+Private Function SplitCollectionByOpartor(pc As Collection, ope, left_col As Collection, right_col As Collection) As Boolean
+    Dim c, f As Boolean, left_c As New Collection, right_c As New Collection
+    f = False
+    For Each c In pc
+        If c(lmIsOpe) = lmOpe Then If c(lmValue) = ope And f = False Then f = True: GoTo nextloop
+        If f = False Then left_c.Add c Else right_c.Add c
+nextloop:
+    Next
+    
+    Set left_col = left_c
+    Set right_col = right_c
+    SplitCollectionByOpartor = f
+    
+End Function
+
+Private Function SetObjectAsEmpty(reval)
+    Dim re As Variant
+    If IsObject(reval) Then Set reval = re Else reval = re
+End Function
+
+Private Function GetVars(eval_vars, var_strings) As Collection
+    Dim i As Long, col As New Collection
+    
+    var_strings = Split(var_strings, ",")
+    
+    If IsArray(eval_vars) = False Then
+        col.Add Array(eval_vars, var_strings(LBound(var_strings)))
+    
+    ElseIf IsArray(eval_vars) And ArrayCount(var_strings) = 1 Then
+        col.Add Array(eval_vars, var_strings(LBound(var_strings)))
+    
+    ElseIf IsArray(eval_vars) And ArrayCount(var_strings) > 1 Then
+        For i = LBound(eval_vars) To UBound(eval_vars)
+            col.Add Array(eval_vars(i), var_strings(i))
+        Next i
+    End If
+    Set GetVars = col
+    
+End Function
+
+Private Function GetEvalVars(var)
+    If IsArray(var) Then
+        GetEvalVars = var
+    Else
+        GetEvalVars = Array(var)
+    End If
+End Function
+
 Private Sub ValidateLambdaString(lambda_string As String)
     If InStr(lambda_string, "=>") = 0 Then Err.Raise 9001, "Lambda.SetLambdaValueFormula()", "Lambda string has error. need ""=>"""
 End Sub
 
 ' "x => x+1" -> "x"
-Private Function GetVarString(lambda_string As String) As String
-    Dim var_string As String
+Private Function GetVarStrings(lambda_string As String)
+    Dim var_string As String, var_strings
     
     var_string = Mid(lambda_string, 1, InStr(lambda_string, "=>") - 1)
+    var_string = Replace(Replace(Replace(var_string, "(", ""), ")", ""), " ", "")
     If Len(var_string) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
-    
-    GetVarString = var_string
+            
+    GetVarStrings = var_string
 End Function
 
 ' "x => x+1" -> "x+1"
@@ -78,262 +684,14 @@ Private Function GetFormulaString(lambda_string As String) As String
     
     formula_string = Mid(lambda_string, InStr(lambda_string, "=>") + 2)
     If Len(formula_string) = 0 Then Err.Raise 9002, "Lambda.SetLambdaValueFormula()", "Lambda string has error."
+    formula_string = AddTags(formula_string)
     
     GetFormulaString = formula_string
-End Function
-
-' example) "x.abc(1 + 1)" -> "x.abc(2)",   "(1 + 3) * 3"-> "4 * 3"
-Private Function ParseParentheses(eval_var, var_string As String, formula_string As String) As String
-    Dim formula_stack As Collection, current_str As String, char As String, i As Long, calculated_value
-    Set formula_stack = New Collection
-
-    For i = 1 To Len(formula_string)
-        char = Mid(formula_string, i, 1)
-
-        If char = "(" Then
-            If current_str <> "" Then formula_stack.Add current_str
-            current_str = ""
-        
-        ElseIf char = ")" Then
-            ' after close parenthese ----------
-            calculated_value = ConvertPolynomialToValue(eval_var, var_string, current_str)
-            
-            If formula_stack.Count > 0 Then
-                current_str = formula_stack.Item(formula_stack.Count) & "(" & calculated_value & ")"
-                formula_stack.Remove formula_stack.Count
-            Else
-                current_str = ""
-            End If
-            ' -----------------------------
-        Else
-            current_str = current_str & char
-            
-        End If
-    Next i
-    ParseParentheses = current_str
-End Function
-
-' example) "x.abc" -> x.abc,  "x.abc.def" -> 3,   "x.abc + x.abc.def" -> x.abc + 3 (error)
-Private Function TryConvertPolynominalToValue(eval_var, var_str As String, formula_str As String, ByRef return_value) As Boolean
-
-    If InStrOperator(formula_str, 1) > 0 Then
-        ' has operator -> polynominal
-        return_value = ConvertPolynomialToValue(eval_var, var_str, formula_str)
-        TryConvertPolynominalToValue = False
-    Else
-        ' nothing operator ->  monominal
-        TryConvertPolynominalToValue = TryConvertMonomialToValue(eval_var, var_str, formula_str, return_value)
-    End If
-    
-End Function
-
-' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1" -> 9
-Private Function ConvertPolynomialToValue(eval_var, var_str As String, formula_str As String) As Variant
-    Dim calculated_value, calculated_string
-    
-    If InStr(formula_str, var_str) > 0 Then
-        calculated_string = ConvertToPolynomialWithoutObject(eval_var, var_str, formula_str)
-    Else
-        calculated_string = formula_str
-    End If
-    
-    calculated_value = RunEvaluate(calculated_string)
-    If IsError(calculated_value) Then Err.Raise 9006, "Lambda.ConvertPolynomialToValue()", "Unsupported lambda string. can not evaluate formula"
-    
-    ConvertPolynomialToValue = calculated_value
-End Function
-
-' example) "x.abc.def + x.abc.efg + 1"  ->  "3 + 5 + 1"
-Private Function ConvertToPolynomialWithoutObject(eval_var, var_str As String, formula_str As String) As String
-    Dim start_index, last_index, term_string As String, buf_val
-    
-    Do While InStr(formula_str, var_str) > 0
-    
-        start_index = InStr(formula_str, var_str)
-        last_index = IIf(InStrOperator(formula_str, start_index) = 0, Len(formula_str), InStrOperator(formula_str, start_index) - 1)
-        term_string = Mid(formula_str, start_index, last_index - start_index + 1)
-    
-        Call TryConvertMonomialToValue(eval_var, var_str, term_string, buf_val)
-    
-        If IsObject(buf_val) Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Failed to evaluate, converted as object"
-        If VarType(buf_val) > vbArray Then Err.Raise 9001, "Lambda.ConvertToPolynomialWithoutObject()", "Unsupport array for evaluate"
-        
-        formula_str = Replace(formula_str, term_string, buf_val)
-    Loop
-    
-    ConvertToPolynomialWithoutObject = formula_str
-End Function
-
-' example) "x.abc.def" -> 1
-Private Function TryConvertMonomialToValue(eval_var, var_str As String, monominal_string As String, ByRef return_value) As Boolean
-On Error GoTo errFunction
-    Dim splited_by_dot, i, index_parenthes_open As Long
-    
-    monominal_string = Replace(monominal_string, " ", "")
-    splited_by_dot = Split(monominal_string, ".")
-    
-    If UBound(splited_by_dot) = 0 Then
-        If InStrOperator(CStr(monominal_string), 1) > 0 Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error.: " & monominal_string
-        
-        If VarType(eval_var) > vbArray Then
-            TryConvertMonomialToValue = TryGetArrayValueByString(eval_var, monominal_string, return_value)
-            Exit Function
-        End If
-        
-        If Len(monominal_string) > Len(var_str) Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error. cannot evaluate.: " & monominal_string
-        If IsObject(eval_var) Then Set return_value = eval_var Else return_value = eval_var
-    Else
-        Set return_value = eval_var
-        For i = 1 To UBound(splited_by_dot)
-            If splited_by_dot(i) = "" Then Err.Raise 9004, "Lambda.TryConvertMonomialToValue()", "Lambda string has error."
-            
-            index_parenthes_open = InStr(splited_by_dot(i), "(")
-            If index_parenthes_open > 0 Then
-                Call SetCallByNameValue( _
-                    called_object:=return_value, _
-                    called_proc_name:=Left(splited_by_dot(i), index_parenthes_open - 1), _
-                    return_value:=return_value, _
-                    args:=Mid(splited_by_dot(i), index_parenthes_open + 1, InStr(splited_by_dot(i), ")") - index_parenthes_open - 1))
-            Else
-                Call SetCallByNameValue(return_value, CStr(splited_by_dot(i)), return_value)
-            End If
-        Next i
-    End If
-    
-    AddTag return_value, return_value
-    If IsObject(return_value) Then TryConvertMonomialToValue = True Else TryConvertMonomialToValue = False
-    Exit Function
-errFunction:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryConvertMonomialToValue()", Err.Description
-End Function
-
-Private Function SetCallByNameValue(called_object, called_proc_name As String, ByRef return_value, Optional args As Variant) As Boolean
-        Dim re
-    If IsMissing(args) Then
-        On Error GoTo errGetWithoutArg
-        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), return_value)
-        SetCallByNameValue = IsObject(return_value)
-        Exit Function
-errGetWithoutArg:
-        If Err.Number = 450 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod), return_value)
-            SetCallByNameValue = IsObject(return_value)
-        ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
-        Else
-            Err.Raise Err.Number, Err.Source, Err.Description
-        End If
-    Else
-        On Error GoTo errGetWitArg
-        Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet, args), return_value)
-        SetCallByNameValue = IsObject(return_value)
-        Exit Function
-errGetWitArg:
-        If Err.Number = 451 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbGet), re)
-            If VarType(re) > vbArray Then
-                SetCallByNameValue = TryGetArrayValueByParamstersString(re, args, return_value)
-            Else
-                Err.Raise Err.Number, Err.Source & "at Lambda.SetCallByNameValue(): Get method with arguments, not array ", Err.Description
-            End If
-        ElseIf Err.Number = 450 Then
-            Call SetObjectAsBuffer(CallByName(called_object, called_proc_name, VbMethod, args), return_value)
-            SetCallByNameValue = IsObject(return_value)
-        ElseIf Err.Number = 438 Then
-            Err.Raise 9001, "Lambda.SetCallByNameValue()", "Not implemented property: " & TypeName(called_object) & "." & called_proc_name
-        Else
-            Err.Raise Err.Number, Err.Source, Err.Description
-        End If
-    End If
-    Exit Function
-End Function
-
-Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value)
-    Dim isObj As Boolean
-    isObj = IsObject(unverified_value)
-    If isObj Then
-        Set buffer_value = unverified_value
-        SetObjectAsBuffer = True
-    Else
-        buffer_value = unverified_value
-        SetObjectAsBuffer = False
-    End If
-End Function
-
-Private Function InStrOperatorBy(string_has_operator, start_index, o) As Long
-    Dim i As Long, str As String
-    
-    str = Mid(string_has_operator, start_index)
-    For i = start_index To Len(string_has_operator)
-        i = i + GetTagLength(str)
-        str = Mid(string_has_operator, i)
-        If Left(str, Len(o)) = o Then InStrOperatorBy = i: Exit Function
-    Next i
-    InStrOperatorBy = 0
-End Function
-
-Private Function InStrOperator(string_has_operator, start_index) As Long
-    Dim i As Long, str As String
-    
-    str = Mid(string_has_operator, start_index)
-    For i = start_index To Len(string_has_operator)
-        i = i + GetTagLength(str)
-        str = Mid(string_has_operator, i)
-        If IsOperator(str) Then InStrOperator = i: Exit Function
-    Next i
-    InStrOperator = 0
-End Function
-
-Private Function IsOperator(operator_string) As Boolean
-    IsOperator = True
-        
-    Dim o
-    For Each o In Operators
-        If Left(operator_string, Len(o)) = o Then Exit Function
-    Next
-    
-    IsOperator = False
-End Function
-
-Private Property Get Operators()
-    Operators = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
-                      " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
-                      "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
-End Property
-
-
-' "1 + 2 * 2"  -> 1 + 4 -> 5 (calculate each operators.(recursively called by self))
-Private Function RunEvaluate(string_has_operator)
-    Dim i As Long, o, vl, vr
-
-On Error GoTo errCalculate
-    
-    For Each o In Operators
-    
-        i = InStrOperatorBy(string_has_operator, 1, o)
-        If i < 1 Then GoTo nextloop
-        
-        ' found matched operator
-        vl = RunEvaluate(Left(string_has_operator, i - 1))
-        vr = RunEvaluate(Mid(string_has_operator, i + Len(o)))
-        RunEvaluate = CalculateOperator(operator_string:=o, left_value:=Trim(vl), right_value:=Trim(vr))
-        Exit Function
-nextloop:
-    Next
-    
-    ' not found matched operator
-    RunEvaluate = string_has_operator
-    Exit Function
-    
-errCalculate:
-    Err.Raise 9001, Err.Source & vbCrLf & " at Lambda.RunEvaluate(" & string_has_operator & "," & o & ")", Err.Description & vbCrLf & "failed to calculate by operator: " & o
 End Function
 
 ' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value, removed_tag_left, removed_tag_right
-    RemoveTags left_value, left_value
-    RemoveTags right_value, right_value
 
 On Error GoTo errCalc
     Select Case operator_string
@@ -362,100 +720,304 @@ On Error GoTo errCalc
     End Select
     
     Dim calculated_value_with_tag
-    AddTag calculated_value, calculated_value_with_tag
-    CalculateOperator = calculated_value_with_tag
+    CalculateOperator = calculated_value
     Exit Function
 errCalc:
-    Err.Raise 9001, "Lambda.CalculateOperator()", "formula string has error : " & left_value & " " & operator_string & " " & right_value
+    Err.Raise 9001, "at Lambda.CalculateOperator()", "failed to calculate. formula string has error : " & left_value & " " & operator_string & " " & right_value
 End Function
 
 
-Private Function AddTag(unverfied_value, re_value)
-    If IsObject(unverfied_value) Then
+
+' ---- element functions ---------------------------------------------
+
+Private Function SetObjectAsBuffer(ByRef unverified_value, ByRef buffer_value) As Boolean
+    
+On Error GoTo errLabel
+    If IsObject(unverified_value) Then
+        Set buffer_value = unverified_value
+        SetObjectAsBuffer = True
+    Else
+        buffer_value = unverified_value
+        SetObjectAsBuffer = False
+    End If
+    Exit Function
+    
+errLabel:
+    Err.Raise 10001, Err.Source & vbCrLf & "at Lambda.SetObjectAsBuffer()", Err.Description
+End Function
+
+Private Function IsOperator(operator_string) As Boolean
+    Dim o
+    
+    IsOperator = True
+    For Each o In Operators
+        If Left(operator_string, Len(o)) = o Then Exit Function
+    Next
+    IsOperator = False
+    
+End Function
+
+Private Function TakeOperator(operator_string) As String
+    Dim o
+    
+    For Each o In Operators
+        If Left(operator_string, Len(o)) = o Then TakeOperator = (o): Exit Function
+    Next
+    
+End Function
+
+Private Property Get Operators()
+    Operators = Array(" Imp ", " Eqv ", " Xor ", " Or ", " And ", " Not ", _
+                      " Is ", " Like ", "<=", ">=", ">", "<", "<>", "=", _
+                      "&", "+", "-", " Mod ", "\", "*", "/", " ^ ")
+End Property
+
+Private Function AddTags(formula_string As String) As String
+    Dim str As String
+    
+    str = formula_string
+    str = AddTag(str, "#")
+    str = AddTag(str, """")
+    AddTags = str
+
+End Function
+
+Private Function AddTag(formula_string As String, by_tag_key As String) As String
+    Dim l  As String, r As String, p As String, stck As New Collection, is_open As Boolean, ln As Long
+    
+    ln = Len(by_tag_key)
+    r = formula_string
+    Do While r <> ""
+        Select Case Mid(r, 1, ln)
+        Case by_tag_key
+            If is_open Then
+                If by_tag_key = """" Then l = AddTagAs(l, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+                If by_tag_key = "#" Then l = AddTagAs(l, TAG_DATE_OPEN, TAG_DATE_CLOSE)
+                Call PopStack(stck, p)
+                l = p & l
+                r = Mid(r, ln + 1)
+                is_open = False
+            Else
+                Call PushStack(stck, l)
+                l = ""
+                r = Mid(r, ln + 1)
+                is_open = True
+            End If
+        End Select
+        l = l & Mid(r, ln, 1)
+        r = Mid(r, ln + 1)
+    Loop
+    Let AddTag = l
+
+End Function
+
+
+Private Function IsBoolean(ByVal str) As Boolean
+    
+    str = Trim(LCase(str))
+    If str = "true" Or str = "false" Then IsBoolean = True Else IsBoolean = False
+    
+End Function
+
+Private Function CanStringToNumeric(ByVal str) As Boolean
+    Dim i As Long, converted_ascii As Integer, f As Boolean, cnt As Long
+    Const ASCII_ZERO As Long = 48
+    Const ASCII_NINE As Long = 57
+    Const ASCII_PERIOD As Long = 46
+    
+    f = True
+    If VarType(str) <> vbString Then CanStringToNumeric = False: Exit Function
+    If str = "" Then CanStringToNumeric = False: Exit Function
+    For i = 1 To Len(str)
+        converted_ascii = Asc(Mid(str, i, 1))
+        f = f And ((ASCII_ZERO <= converted_ascii And converted_ascii <= ASCII_NINE) Or converted_ascii = ASCII_PERIOD)
+        If converted_ascii = ASCII_PERIOD Then If cnt = 1 Then f = False Else cnt = 1
+    Next i
+    CanStringToNumeric = f
+
+End Function
+
+
+Private Function ConvertStringToValue(unverfied_value, re_value)
+    
+On Error GoTo errLabel:
+    If IsError(unverfied_value) Then
+        Let re_value = unverfied_value
+    ElseIf IsObject(unverfied_value) Then
         Set re_value = unverfied_value
-    ElseIf IsDate(unverfied_value) Then
-        re_value = AddTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE)
+    ElseIf IsArray(unverfied_value) Then
+        Let re_value = unverfied_value
     ElseIf VarType(unverfied_value) = vbBoolean Then
         re_value = unverfied_value
-    ElseIf IsNumeric(unverfied_value) Then
+    ElseIf IsBoolean(unverfied_value) Then
+        re_value = CBool(unverfied_value)
+        
+    ' string(has tags)
+    ElseIf HasTagBy(unverfied_value, TAG_DATE_OPEN) Then
+        re_value = DateValue(RemoveTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE))
+    ElseIf HasTagBy(unverfied_value, TAG_STRING_OPEN) Then
+        re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+        
+        ' no need to convert datetime
+
+    ' numeric
+    ElseIf CanStringToNumeric(unverfied_value) Then
         re_value = val(unverfied_value)
-    ElseIf VarType(unverfied_value) = vbString Then
-        re_value = AddTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
+        
+        ' string (has no tags) or date
     Else
         re_value = unverfied_value
     End If
+    Exit Function
+
+errLabel:
+    Err.Raise 10000, Err.Source & vbCrLf & "at Lambda.ConvertStringToValue()", Err.Description
 End Function
 
-Private Function RemoveTags(unverfied_value, re_value)
-    If IsObject(unverfied_value) Then
-        Set re_value = unverfied_value
-    ElseIf VarType(unverfied_value) = vbBoolean Then
-        re_value = unverfied_value
-    ElseIf IsNumeric(unverfied_value) Then
-        re_value = val(unverfied_value)
-    ElseIf VarType(unverfied_value) = vbString Then
-        If HasTagBy(unverfied_value, TAG_DATE_OPEN) Then re_value = DateValue(RemoveTagAs(unverfied_value, TAG_DATE_OPEN, TAG_DATE_CLOSE))
-        If HasTagBy(unverfied_value, TAG_STRING_OPEN) Then re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
-    Else
-        re_value = unverfied_value
-'        Debug.Print "(RemoveTags()) unexpected value:" & unverfied_value
-    End If
-End Function
+Private Function HasTagBy(str, ta) As Boolean
+    
+    If Left(str, Len(ta)) = ta Then HasTagBy = True Else HasTagBy = False
 
-Private Function HasTagBy(str, ope) As Boolean
-    If Left(str, Len(ope)) = ope Then HasTagBy = True Else HasTagBy = False
 End Function
 
 Private Function AddTagAs(converting_string, tag_open, tag_close) As String
+    
     If Left(converting_string, 1) = "<" And Right(converting_string, 2) = "/>" Then AddTagAs = converting_string Else AddTagAs = tag_open & converting_string & tag_close
+
 End Function
 
-Private Function RemoveTagAs(deconverting_string, tag_open, tag_close)
-    If Left(deconverting_string, 1) = "<" And Right(deconverting_string, 2) = "/>" Then RemoveTagAs = Replace(Replace(deconverting_string, tag_open, ""), tag_close, "") Else RemoveTagAs = deconverting_string
+Private Function RemoveTagAs(ByRef deconverting_string, tag_open, tag_close)
+    
+    If VarType(deconverting_string) = vbString Then If Left(deconverting_string, 1) = "<" And Right(deconverting_string, 2) = "/>" Then RemoveTagAs = Replace(Replace(deconverting_string, tag_open, ""), tag_close, "") Else RemoveTagAs = deconverting_string
+
 End Function
 
-Private Function GetTagLength(str) As Long
-    GetTagLength = 0
-    If Left(str, Len("<")) = "<" Then GetTagLength = InStr(str, "/>") + Len("/>") - 1
+Private Function GetTagSpanLengthWithStarted(str) As Long
+    
+    If IsStartedWithTags(str) = False Then
+        GetTagSpanLengthWithStarted = 0
+    Else
+        GetTagSpanLengthWithStarted = InStr(str, "/>") + Len("/>") - 1
+    End If
+
 End Function
+
+Private Function IsStartedWithTags(str) As Boolean
+    
+    IsStartedWithTags = False
+    If Left(str, Len(TAG_STRING_OPEN)) = TAG_STRING_OPEN Then IsStartedWithTags = True
+    If Left(str, Len(TAG_DATE_OPEN)) = TAG_DATE_OPEN Then IsStartedWithTags = True
+        
+End Function
+
 
 ' related arrays -------------------------------
-Private Function TryGetArrayValueByString(arr, array_sting, reval) As Boolean
-    Dim pstr As String, parr
-    If IsArrayHasArgument(array_sting) Then
-        pstr = ExtructArrayParametersString(array_sting)
-        TryGetArrayValueByString = TryGetArrayValueByParamstersString(arr, pstr, reval)
+Private Function ArrayCount(arr, Optional d As Long = 1) As Long
+    
+    ArrayCount = UBound(arr, d) - LBound(arr, d) + 1
+
+End Function
+
+Private Function IsMethodOrPropString(ByVal monomical_string As String, inner_collection As Collection) As Boolean
+    
+    If InStr(monomical_string, "Call ") > 0 Then
+        IsMethodOrPropString = True
     Else
-        reval = arr
-        TryGetArrayValueByString = True
+        IsMethodOrPropString = inner_collection.Count > 0
     End If
+    
 End Function
-Private Function TryGetArrayValueByParamstersString(arr, parameter_sting, reval) As Boolean
-        Dim pstr As String, parr
-        parr = GetArrayParametersByString(parameter_sting)
-        TryGetArrayValueByParamstersString = TryGetArrayValue(arr, parr, reval)
+
+Private Function GetMethodOrPropNamFrom(ByVal method_or_prop_string As String) As String
+    
+    If InStr(method_or_prop_string, "Call ") > 0 Then
+        GetMethodOrPropNamFrom = Replace(method_or_prop_string, "Call ", "")
+    Else
+        GetMethodOrPropNamFrom = method_or_prop_string
+    End If
+    
 End Function
-Private Function IsArrayHasArgument(array_string) As Boolean
-    IsArrayHasArgument = InStr(array_string, "(") > 0
+
+
+Private Function ExtructProcNameParamString(function_string, ByRef proc_name, ByRef param_string)
+    Dim index_parenthes_open, l, r
+    
+    index_parenthes_open = InStr(function_string, "(")
+    If index_parenthes_open < 1 Then
+        proc_name = function_string
+        param_string = ""
+    Else
+        proc_name = Left(function_string, index_parenthes_open - 1)
+        Call SplitFirsrParenthese(Mid(function_string, Len(proc_name) + 1), l, r)
+        param_string = Mid(l, 2, Len(l) - 2)
+    End If
+
+    If IS_DEBUG_MODE Then Debug.Print " ---- ExtructProcNameParamString : (procedure name) " & proc_name & " (parameter string) " & param_string
 End Function
-Private Function ExtructArrayParametersString(array_sting) As String
-    ExtructArrayParametersString = Mid(array_sting, InStr(array_sting, "(") + 1, InStr(array_sting, ")") - 1 - InStr(array_sting, "("))
+
+Private Function ExtructProcParamString(function_string) As String
+    Dim index_parenthes_open
+    
+    index_parenthes_open = InStr(function_string, "(")
+    If index_parenthes_open < 1 Then ExtructProcParamString = function_string: Exit Function
+    ExtructProcParamString = Left(function_string, index_parenthes_open - 1)
+
 End Function
-Private Function GetArrayParametersByString(parameters_sting)
-    GetArrayParametersByString = Split(parameters_sting, ",")
+
+Private Function HasVariableIn(formula_string As String) As Boolean
+    Dim v, f As Boolean
+    
+    For Each v In vars_
+       If formula_string = v(1) Then HasVariableIn = True: Exit Function
+    Next
+
 End Function
-Private Function TryGetArrayValue(arr, p, reval) As Boolean
-On Error GoTo errArray
-    Dim rnk As Long: rnk = UBound(p) - LBound(p) + 1
-    Select Case rnk
-        Case 1: TryGetArrayValue = SetObjectAsBuffer(arr(p(0)), reval)
-        Case 2: TryGetArrayValue = SetObjectAsBuffer(arr(p(0), p(1)), reval)
-        Case 3: TryGetArrayValue = SetObjectAsBuffer(arr(p(0), p(1), p(2)), reval)
-        Case Else
-            Err.Raise 9009, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", "unsupported dimension array"
-    End Select
-    Exit Function
-errArray:
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.TryGetArrayValue()", Err.Description
+
+Private Function CollectionToArray(col As Collection)
+    Dim arr, i
+    
+    If col.Count = 1 Then
+        arr = col(1)
+    Else
+        
+        ReDim arr(0 To col.Count - 1)
+        For i = 0 To UBound(arr)
+            Call SetObjectAsBuffer(col(i + 1), arr(i))
+        Next i
+    End If
+    Let CollectionToArray = arr
+End Function
+
+Private Function GetInnerStringsClosedBy(str As String, closed_by As String) As String
+    Dim l As Long
+    
+    Let l = Len(closed_by) + 1
+    Let GetInnerStringsClosedBy = Mid(str, l, Len(str) - l)
+    
+End Function
+
+Private Function PushStack(pushed_stack As Collection, var As Variant)
+
+    pushed_stack.Add var
+
+End Function
+
+Private Function PopStack(poped_stack As Collection, var As Variant)
+
+    If poped_stack.Count > 0 Then
+        SetObjectAsBuffer poped_stack(poped_stack.Count), var
+        poped_stack.Remove poped_stack.Count
+    End If
+
+End Function
+
+Private Function IsNullOrEmptyOrNothing(unverified_value) As Boolean
+    
+    If IsObject(unverified_value) Then
+        Let IsNullOrEmptyOrNothing = (unverified_value Is Nothing)
+    Else
+        Let IsNullOrEmptyOrNothing = (IsNull(unverified_value) Or IsEmpty(unverified_value))
+    End If
+
 End Function
 
