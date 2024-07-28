@@ -766,6 +766,24 @@ Private Function IsBoolean(ByVal str) As Boolean
     
 End Function
 
+Private Function CanStringToNumeric(ByVal str) As Boolean
+    Dim i As Long, converted_ascii As Integer, f As Boolean, cnt As Long
+    Const ASCII_ZERO As Long = 48
+    Const ASCII_NINE As Long = 57
+    Const ASCII_PERIOD As Long = 46
+    
+    f = True
+    If VarType(str) <> vbString Then CanStringToNumeric = False : Exit Function
+    If str = "" Then CanStringToNumeric = False : Exit Function
+    For i = 1 To Len(str)
+        converted_ascii = Asc(Mid(str, i, 1))
+        f = f And ((ASCII_ZERO <= converted_ascii And converted_ascii <= ASCII_NINE) Or converted_ascii = ASCII_PERIOD)
+        If converted_ascii = ASCII_PERIOD Then If cnt = 1 Then f = False Else cnt = 1
+    Next i
+    CanStringToNumeric = f
+
+End Function
+
 
 Private Function ConvertStringToValue(unverfied_value, re_value)
     
