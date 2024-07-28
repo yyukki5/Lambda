@@ -113,7 +113,6 @@ End Function
 
 Private Function ConvertMonominalObjectToValue(object_string, parent_object) As Variant
     Dim formula_string As String, inner_string As String, inner_collection As Collection, inner_collection_re As New Collection, ic, tmp
-'    If IS_DEBUG_MODE Then Debug.Print " --- ConvertMonominalObjectToValue : " & object_string
     
     Call ExtructProcNameParamString(object_string, formula_string, inner_string)
     Set inner_collection = SplitByComma(inner_string)
@@ -687,8 +686,6 @@ End Function
 ' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value, removed_tag_left, removed_tag_right
-'    ConvertStringToValue left_value, left_value
-'    ConvertStringToValue right_value, right_value
 
 On Error GoTo errCalc
     Select Case operator_string
