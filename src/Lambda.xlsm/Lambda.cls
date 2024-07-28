@@ -787,7 +787,10 @@ End Function
 
 Private Function ConvertStringToValue(unverfied_value, re_value)
     
-    If IsObject(unverfied_value) Then
+    On Error GoTo errLabel
+    If IsError(unverfied_value) Then
+        Let re_value = unverfied_value
+    ElseIf IsObject(unverfied_value) Then
         Set re_value = unverfied_value
     ElseIf IsArray(unverfied_value) Then
         Let re_value = unverfied_value
@@ -802,15 +805,20 @@ Private Function ConvertStringToValue(unverfied_value, re_value)
     ElseIf HasTagBy(unverfied_value, TAG_STRING_OPEN) Then
         re_value = RemoveTagAs(unverfied_value, TAG_STRING_OPEN, TAG_STRING_CLOSE)
         
+        ' no need to convert datetime
+
     ' numeric
-    ElseIf IsNumeric(unverfied_value) Then
+    ElseIf CanStringToNumeric(unverfied_value) Then
         re_value = val(unverfied_value)
         
-    ' string (has no tags)
+        ' string (has no tags) or date
     Else
         re_value = unverfied_value
     End If
+    Exit Function
 
+errLabel:
+    Err.Raise 10000, Err.Source & vbCrLf & "at Lambda.ConvertStringToValue()", Err.Description
 End Function
 
 Private Function HasTagBy(str, ta) As Boolean
