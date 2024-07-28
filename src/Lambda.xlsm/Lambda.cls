@@ -492,16 +492,22 @@ End Function
 
 
 Private Function SplitByComma(str As String) As Collection
-    Dim i As Long, col As New Collection, tmp As String, cntPar As Long
+    Dim i As Long, col As New Collection, tmp As String, temp_string As String, cntPar As Long, cntTag As Long
     
     For i = 1 To Len(str)
-        Select Case Mid(str, i, 1)
-            Case "(":             Let cntPar = cntPar + 1
-            Case ")":             Let cntPar = cntPar - 1
-            Case Else
-        End Select
+        temp_string = Mid(str, i)
+        If HasTagBy(temp_string, TAG_STRING_OPEN) Then
+            cntTag = cntTag + 1
+        ElseIf HasTagBy(temp_string, TAG_STRING_CLOSE) Then
+            cntTag = cntTag - 1
+        ElseIf Mid(temp_string, 1, 1) = "(" Then
+            Let cntPar = cntPar + 1
+        ElseIf Mid(temp_string, 1, 1) = ")" Then
+            Let cntPar = cntPar - 1
+        Else
+        End If
         
-        If Mid(str, i, 1) = "," And cntPar = 0 Then
+        If Mid(str, i, 1) = "," And cntPar = 0 And cntTag = 0 Then
             col.Add tmp
             tmp = ""
         Else
