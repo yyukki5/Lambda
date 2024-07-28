@@ -20,6 +20,8 @@ Option Explicit
 '  - multi lines
 ' ----------------------------------------------------
 
+Private Const IS_DEBUG_MODE As Boolean = False
+
 Private Const TAG_STRING_OPEN As String = "<string "
 Private Const TAG_STRING_CLOSE As String = " string/>"
 Private Const TAG_DATE_OPEN As String = "<date "
@@ -54,17 +56,20 @@ Attribute Initialize.VB_UserMemId = 0
     Set vars_ = GetVars(var, GetVarStrings(lambda_string))
     
     Set Initialize = Me
+    
+    If IS_DEBUG_MODE Then Debug.Print vbCrLf & " - Lambda string : " & lambdaString_
 End Function
 
 Public Function Evaluate()
 
 On Error GoTo errLabel
     Call ParsePolynominal(lambdaString_, Evaluate)
+    Call RemoveTagAs(Evaluate, TAG_STRING_OPEN, TAG_STRING_CLOSE)
     Exit Function
     
 errLabel:
-    Debug.Print Err.Description & vbCrLf & Err.Source
-    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description
+    If IS_DEBUG_MODE Then Debug.Print Err.Description & vbCrLf & Err.Source
+    Err.Raise Err.Number, Err.Source & vbCrLf & "at Lambda.Evaluate()", Err.Description & vbCrLf & Err.Source
 End Function
 
 
@@ -96,6 +101,7 @@ End Function
 
 Private Function ConvertMonominalStringToValue(monominal_string As String, reval) As Variant
     Dim monominal_collection As Collection, tmp, m, p
+    If IS_DEBUG_MODE Then Debug.Print " -- ConvertMonominalStringToValue : " & monominal_string
     
     Set monominal_collection = SplitMonominalStringByDot(monominal_string)
     For Each m In monominal_collection
@@ -107,6 +113,7 @@ End Function
 
 Private Function ConvertMonominalObjectToValue(object_string, parent_object) As Variant
     Dim formula_string As String, inner_string As String, inner_collection As Collection, inner_collection_re As New Collection, ic, tmp
+'    If IS_DEBUG_MODE Then Debug.Print " --- ConvertMonominalObjectToValue : " & object_string
     
     Call ExtructProcNameParamString(object_string, formula_string, inner_string)
     Set inner_collection = SplitByComma(inner_string)
@@ -155,6 +162,13 @@ On Error GoTo errLabel
     Else
         ' ***.---
         Call GetChildVar(formula_string, inner_collection, parent_object, reval)
+    End If
+    
+    If IS_DEBUG_MODE Then
+        Dim str As String, f As Boolean
+        If VarType(reval) = vbString Then str = reval: f = True
+        If IsNumeric(reval) Then str = CStr(reval): f = True
+        If f Then Debug.Print " ----- EvaluateMonominalObject : " & formula_string & " -> " & str
     End If
     Exit Function
     
@@ -288,6 +302,8 @@ On Error GoTo errLabel
             End If
         Case "LCase": Let reval = VBA.LCase(a(1))
         Case "UCase": Let reval = VBA.UCase(a(1))
+        Case "LBound": Let reval = LBound(a(1))
+        Case "UBound": Let reval = UBound(a(1))
         Case "Left": Let reval = VBA.Left(a(1), a(2))
         Case "Len": Let reval = VBA.Len(a(1))
         Case "LTrim": Let reval = VBA.LTrim(a(1))
@@ -643,8 +659,8 @@ End Function
 ' 1 + 4  -> 5
 Private Function CalculateOperator(operator_string, left_value, right_value)
     Dim calculated_value, removed_tag_left, removed_tag_right
-    ConvertStringToValue left_value, left_value
-    ConvertStringToValue right_value, right_value
+'    ConvertStringToValue left_value, left_value
+'    ConvertStringToValue right_value, right_value
 
 On Error GoTo errCalc
     Select Case operator_string
@@ -779,8 +795,8 @@ Private Function CanStringToNumeric(ByVal str) As Boolean
     Const ASCII_PERIOD As Long = 46
     
     f = True
-    If VarType(str) <> vbString Then CanStringToNumeric = False : Exit Function
-    If str = "" Then CanStringToNumeric = False : Exit Function
+    If VarType(str) <> vbString Then CanStringToNumeric = False: Exit Function
+    If str = "" Then CanStringToNumeric = False: Exit Function
     For i = 1 To Len(str)
         converted_ascii = Asc(Mid(str, i, 1))
         f = f And ((ASCII_ZERO <= converted_ascii And converted_ascii <= ASCII_NINE) Or converted_ascii = ASCII_PERIOD)
@@ -793,7 +809,7 @@ End Function
 
 Private Function ConvertStringToValue(unverfied_value, re_value)
     
-    On Error GoTo errLabel
+On Error GoTo errLabel:
     If IsError(unverfied_value) Then
         Let re_value = unverfied_value
     ElseIf IsObject(unverfied_value) Then
@@ -839,9 +855,9 @@ Private Function AddTagAs(converting_string, tag_open, tag_close) As String
 
 End Function
 
-Private Function RemoveTagAs(deconverting_string, tag_open, tag_close)
+Private Function RemoveTagAs(ByRef deconverting_string, tag_open, tag_close)
     
-    If Left(deconverting_string, 1) = "<" And Right(deconverting_string, 2) = "/>" Then RemoveTagAs = Replace(Replace(deconverting_string, tag_open, ""), tag_close, "") Else RemoveTagAs = deconverting_string
+    If VarType(deconverting_string) = vbString Then If Left(deconverting_string, 1) = "<" And Right(deconverting_string, 2) = "/>" Then RemoveTagAs = Replace(Replace(deconverting_string, tag_open, ""), tag_close, "") Else RemoveTagAs = deconverting_string
 
 End Function
 
@@ -905,6 +921,7 @@ Private Function ExtructProcNameParamString(function_string, ByRef proc_name, By
         param_string = Mid(l, 2, Len(l) - 2)
     End If
 
+    If IS_DEBUG_MODE Then Debug.Print " ---- ExtructProcNameParamString : (procedure name) " & proc_name & " (parameter string) " & param_string
 End Function
 
 Private Function ExtructProcParamString(function_string) As String
@@ -920,7 +937,7 @@ Private Function HasVariableIn(formula_string As String) As Boolean
     Dim v, f As Boolean
     
     For Each v In vars_
-       If InStr(formula_string, v(1)) > 0 Then HasVariableIn = True: Exit Function
+       If formula_string = v(1) Then HasVariableIn = True: Exit Function
     Next
 
 End Function
